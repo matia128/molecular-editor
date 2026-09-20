@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Molecular Editor</title>
+  <link rel="stylesheet" href="css/styles.css?v=benzene-hover-1" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
+  <script src="https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js"></script>
+</head>
+<body>
+  <main class="workspace">
+    <div class="workspace-chrome workspace-chrome-back">
+      <div class="workspace-left-toolboxes">
+        <aside class="atom-toolbox" id="atom-toolbox" aria-label="Atom palette">
+          <div class="atom-toolbox-rows">
+            <div class="atom-palette" id="atom-palette">
+              <div class="atom-btn" data-element="H" data-tooltip="Hydrogen" role="button" tabindex="0">H</div>
+              <div class="atom-btn" data-element="C" data-tooltip="Carbon" role="button" tabindex="0">C</div>
+              <div class="atom-btn" data-element="N" data-tooltip="Nitrogen" role="button" tabindex="0">N</div>
+              <div class="atom-btn" data-element="O" data-tooltip="Oxygen" role="button" tabindex="0">O</div>
+            </div>
+            <div class="atom-palette atom-palette-extra" id="atom-palette-extra" aria-hidden="true">
+              <div class="atom-btn" data-element="F" data-tooltip="Fluorine" role="button" tabindex="0">F</div>
+              <div class="atom-btn" data-element="Cl" data-tooltip="Chlorine" role="button" tabindex="0">Cl</div>
+              <div class="atom-btn" data-element="P" data-tooltip="Phosphorus" role="button" tabindex="0">P</div>
+              <div class="atom-btn" data-element="S" data-tooltip="Sulphur" role="button" tabindex="0">S</div>
+            </div>
+          </div>
+          <button type="button" class="atom-toolbox-bookmark" id="atom-toolbox-expand" data-tooltip-collapsed="More options" data-tooltip-expanded="See less" aria-label="Show more atoms" aria-expanded="false" aria-controls="atom-palette-extra">
+            <svg class="atom-toolbox-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+        </aside>
+      </div>
+      <div class="canvas-top-toolbox">
+        <aside class="canvas-toolbox" aria-label="Canvas tools">
+          <div class="canvas-tool-palette">
+            <div class="canvas-tool-group canvas-tool-zoom">
+              <button type="button" class="canvas-tool-btn canvas-tool-zoom-in" id="btn-canvas-zoom-in" data-tooltip="Enlarge molecules" aria-label="Enlarge molecules">
+                <svg class="canvas-tool-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <button type="button" class="canvas-tool-btn canvas-tool-zoom-out" id="btn-canvas-zoom-out" data-tooltip="Shrink molecules" aria-label="Shrink molecules">
+                <svg class="canvas-tool-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+            </div>
+            <div class="canvas-tool-group canvas-tool-actions">
+              <button type="button" class="canvas-tool-btn canvas-tool-clear" id="btn-canvas-clear-all" data-tooltip="Clear canvas" aria-label="Clear canvas">
+                <svg class="canvas-tool-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 6h18" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                  <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  <path d="M10 11v6" />
+                  <path d="M14 11v6" />
+                </svg>
+              </button>
+              <button type="button" class="canvas-tool-btn canvas-tool-fill-h" id="btn-fill-hydrogen" data-tooltip="Bond all free electrons with hydrogens" aria-label="Bond all free electrons with hydrogens">
+                <span class="canvas-tool-h-mark" aria-hidden="true">H</span>
+              </button>
+              <button type="button" class="canvas-tool-btn canvas-tool-benzene" id="btn-generate-benzene" data-tooltip="generate a benzene ring" aria-label="generate a benzene ring">
+                <svg class="canvas-tool-icon canvas-tool-icon-benzene" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+                  <polygon points="12,1.6 21.4,7.05 21.4,16.95 12,22.4 2.6,16.95 2.6,7.05" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+      <div class="canvas-bottom-tools">
+        <div class="canvas-trash-bin" id="canvas-trash-bin" data-tooltip="Drag atoms and compounds here to delete them" aria-label="Drag atoms and compounds here to delete them">
+          <svg class="canvas-trash-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 6h18" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+        </div>
+      </div>
+    </div>
+    <canvas id="chemistry-canvas"></canvas>
+  </main>
+
+  <header class="toolbar">
+    <h1>Molecular Editor</h1>
+    <div class="toolbar-actions">
+      <span id="status" class="status">Ready — drag atoms onto the canvas</span>
+    </div>
+  </header>
+
+  <aside id="compound-panel" class="compound-panel hidden" aria-hidden="true">
+    <button type="button" class="compound-panel-bookmark" id="panel-close" data-tooltip="Close panel" aria-label="Close panel">
+      <svg class="compound-panel-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M9 6l6 6-6 6" />
+      </svg>
+    </button>
+    <div class="compound-panel-content">
+      <div class="compound-panel-scroll-inner">
+        <h2 id="panel-title">Compound Properties</h2>
+        <dl id="panel-properties"></dl>
+        <div id="panel-enrichment-status" class="panel-enrichment-status" hidden aria-live="polite" aria-label="Loading compound details">
+          <svg class="panel-loading-spinner" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="status" aria-hidden="true">
+            <defs>
+              <linearGradient id="panel-fade-arc-leading" x1="50%" x2="50%" y1="5.271%" y2="91.793%">
+                <stop offset="0%" stop-color="currentColor" />
+                <stop offset="100%" stop-color="currentColor" stop-opacity="0.55" />
+              </linearGradient>
+              <linearGradient id="panel-fade-arc-trailing" x1="50%" x2="50%" y1="15.24%" y2="87.15%">
+                <stop offset="0%" stop-color="currentColor" stop-opacity="0" />
+                <stop offset="100%" stop-color="currentColor" stop-opacity="0.55" />
+              </linearGradient>
+            </defs>
+            <g fill="none">
+              <path d="M8.749.021a1.5 1.5 0 0 1 .497 2.958A7.5 7.5 0 0 0 3 10.375a7.5 7.5 0 0 0 7.5 7.5v3c-5.799 0-10.5-4.7-10.5-10.5C0 5.23 3.726.865 8.749.021" fill="url(#panel-fade-arc-leading)" transform="translate(1.5 1.625)" />
+              <path d="M15.392 2.673a1.5 1.5 0 0 1 2.119-.115A10.48 10.48 0 0 1 21 10.375c0 5.8-4.701 10.5-10.5 10.5v-3a7.5 7.5 0 0 0 5.007-13.084a1.5 1.5 0 0 1-.115-2.118" fill="url(#panel-fade-arc-trailing)" transform="translate(1.5 1.625)" />
+            </g>
+          </svg>
+        </div>
+        <div id="panel-attribution" class="panel-attribution" hidden></div>
+      </div>
+    </div>
+  </aside>
+
+  <script src="js/app.js?v=s-break-double-e-1"></script>
+</body>
+</html>

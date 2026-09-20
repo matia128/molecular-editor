@@ -1,0 +1,31 @@
+{
+  "name": "chemical-discovery-sandbox",
+  "version": "1.0.0",
+  "description": "Gamified chemical structure editor with PubChem validation",
+  "scripts": {
+    "dev": "npx --yes serve . -p 3000",
+    "test:water": "node test/debug-water.mjs",
+    "test:co-dative": "node test/co-dative-bond.mjs",
+    "test:co-pipeline": "node test/co-dative-pipeline.mjs",
+    "test:ozone-pipeline": "node test/ozone-pipeline.mjs",
+    "test:n-dative": "node test/n-dative-bond.mjs",
+    "test:n-dative-pipeline": "node test/n-dative-pipeline.mjs",
+    "test:n-dative-resonance-pipeline": "node test/n-dative-resonance-pipeline.mjs",
+    "test:cl-dative": "node test/cl-dative-bond.mjs",
+    "test:cl-dative-pipeline": "node test/cl-dative-pipeline.mjs",
+    "test:cl-dative-encoding": "node test/cl-dative-encoding.mjs",
+    "test:cl-f-bond": "node test/cl-f-bond.mjs",
+    "test:clf-recognition": "node test/clf-recognition.mjs",
+    "test:clf-break": "node test/clf-break.mjs"
+  },
+  "keywords": [
+    "chemistry",
+    "cheminformatics",
+    "pubchem",
+    "rdkit"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}
