@@ -24,7 +24,6 @@
     "pubchem",
     "rdkit"
   ],
-  "license": "MIT",
   "devDependencies": {
     "playwright": "^1.61.1"
   }
