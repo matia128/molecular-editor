@@ -1,4 +1,4 @@
-# Chemical Discovery Sandbox
+# molecular-editor
 
 A web-based, gamified chemical structure editor. Drag atoms (`C`, `H`, `O`, `N`) onto a canvas, snap them together on a rigid 90° orbital grid, and let PubChem identify balanced molecules automatically.
 
