@@ -2340,19 +2340,25 @@
       val === 's_dative' || val === 'cl_dative';
   }
 
+  function isCarbonChalcogen(element) {
+    return element === 'O' || element === 'S';
+  }
+
   function isCoOnlyDiatomic(compound) {
     if (!compound || compound.atoms.length !== 2 || compound.bonds.length !== 1) return false;
     var e0 = compound.atoms[0].element;
     var e1 = compound.atoms[1].element;
-    return (e0 === 'C' && e1 === 'O') || (e0 === 'O' && e1 === 'C');
+    return (e0 === 'C' && isCarbonChalcogen(e1)) || (e1 === 'C' && isCarbonChalcogen(e0));
   }
 
   function getCoBondEnds(bond) {
+    var carbon = bond.atomA.element === 'C' ? bond.atomA : bond.atomB;
+    var other = carbon.id === bond.atomA.id ? bond.atomB : bond.atomA;
     return {
-      carbon: bond.atomA.element === 'C' ? bond.atomA : bond.atomB,
-      oxygen: bond.atomA.element === 'O' ? bond.atomA : bond.atomB,
-      carbonSlot: bond.atomA.element === 'C' ? bond.slotA : bond.slotB,
-      oxygenSlot: bond.atomA.element === 'O' ? bond.slotA : bond.slotB,
+      carbon: carbon,
+      oxygen: other,
+      carbonSlot: carbon.id === bond.atomA.id ? bond.slotA : bond.slotB,
+      oxygenSlot: other.id === bond.atomA.id ? bond.slotA : bond.slotB,
     };
   }
 
@@ -3055,6 +3061,48 @@
     snapEngine.electronResolver.breakBondSlot(donor, donorSlot, order);
   }
 
+  function restoreSulfurHubLonePair(sulfur, compound, hub) {
+    if (!hub || !hub.loneSlot) return;
+    var bondSlots = new Set();
+    for (var i = 0; i < compound.bonds.length; i++) {
+      var bond = compound.bonds[i];
+      if (bond.atomA.id !== sulfur.id && bond.atomB.id !== sulfur.id) continue;
+      bondSlots.add(bondSlotForAtom(bond, sulfur));
+    }
+    if (!bondSlots.has(hub.loneSlot)) {
+      sulfur.orbitals[hub.loneSlot] = 2;
+    }
+  }
+
+  function collapseSulfurTrioxideToDioxide(sulfur, compound, hub, promotedType2Bond) {
+    hub.type3BondId = null;
+    hub.type2BondId = promotedType2Bond.id;
+    hub.resonanceActive = true;
+    hub.resonanceState = 0;
+    applyNDativeResonanceState(
+      sulfur, compound, 0, nDativeResonanceApplyOpts(hub, sulfur, compound));
+    restoreSulfurHubLonePair(sulfur, compound, hub);
+    refreshNDativeHub(sulfur, compound);
+  }
+
+  function breakSulfurTrioxideReceiverBond(bond, compound, sulfur, hub, snapEngine) {
+    var noEnds = getNoBondEnds(bond);
+    var loneSlot = hub.loneSlot;
+    var type2Bond = findBondById(compound, hub.type2BondId);
+    var type3Bond = findBondById(compound, hub.type3BondId);
+    returnOxoResonanceBondElectrons(bond, sulfur, snapEngine);
+    compound.removeBond(bond.id);
+    restoreIsolatedOxygen(noEnds.oxygen);
+    clearNDativeHub(sulfur);
+    if (!type2Bond || !type3Bond) {
+      restoreNitrogenFromRemainingBonds(sulfur, compound, loneSlot, snapEngine.electronResolver);
+      return;
+    }
+    registerNDativeHub(sulfur, loneSlot, type3Bond.id);
+    sulfur.nDativeHub.type2BondId = type2Bond.id;
+    collapseSulfurTrioxideToDioxide(sulfur, compound, sulfur.nDativeHub, type2Bond);
+  }
+
   function breakNDativeResonanceType3Bond(bond, compound, nitrogen, hub, snapEngine) {
     var ends = getNoBondEnds(bond);
     returnOxoResonanceBondElectrons(bond, nitrogen, snapEngine);
@@ -3062,7 +3110,15 @@
     restoreIsolatedOxygen(ends.oxygen);
     hub.type3BondId = null;
     if (hub.resonanceState > 1) hub.resonanceState = 0;
+    if (hub.type2BondId && hub.receiverBondId) {
+      hub.resonanceActive = true;
+      applyNDativeResonanceState(
+        nitrogen, compound, hub.resonanceState || 0,
+        nDativeResonanceApplyOpts(hub, nitrogen, compound));
+      if (nitrogen.element === 'S') restoreSulfurHubLonePair(nitrogen, compound, hub);
+    }
     refreshNDativeHub(nitrogen, compound);
+    if (window.app && window.app.renderer) window.app.renderer.ensureNDativeResonanceTimer();
     snapEngine.clearPairSuppression(bond.atomA, bond.atomB);
     return true;
   }
@@ -3073,12 +3129,16 @@
     compound.removeBond(bond.id);
     restoreIsolatedOxygen(ends.oxygen);
     var type3Bond = findBondById(compound, hub.type3BondId);
-    if (type3Bond) restoreOxoDativeBond(type3Bond, nitrogen);
     hub.type2BondId = null;
-    hub.type3BondId = null;
-    hub.resonanceActive = false;
-    hub.resonanceState = 0;
-    refreshNDativeHub(nitrogen, compound);
+    if (type3Bond && nitrogen.element === 'S') {
+      collapseSulfurTrioxideToDioxide(nitrogen, compound, hub, type3Bond);
+    } else {
+      if (type3Bond) restoreOxoDativeBond(type3Bond, nitrogen);
+      hub.type3BondId = null;
+      hub.resonanceActive = false;
+      hub.resonanceState = 0;
+      refreshNDativeHub(nitrogen, compound);
+    }
     if (window.app && window.app.renderer) window.app.renderer.ensureNDativeResonanceTimer();
     snapEngine.clearPairSuppression(bond.atomA, bond.atomB);
     return true;
@@ -3359,6 +3419,8 @@
       }),
       ozoneActive: compound.ozoneActive,
       ozoneResonanceState: compound.ozoneResonanceState,
+      n2oActive: compound.n2oActive,
+      n2oResonanceState: compound.n2oResonanceState,
     };
   }
 
@@ -3381,6 +3443,8 @@
     }
     compound.ozoneActive = snapshot.ozoneActive;
     compound.ozoneResonanceState = snapshot.ozoneResonanceState;
+    compound.n2oActive = snapshot.n2oActive;
+    compound.n2oResonanceState = snapshot.n2oResonanceState;
   }
 
   function getBoundsForNDativeResonanceState(compound, stateIndex) {
@@ -3404,6 +3468,16 @@
     return bounds;
   }
 
+  function getBoundsForN2OResonanceState(compound, stateIndex) {
+    var snapshot = snapshotCompoundVisualState(compound);
+    if (typeof window !== 'undefined' && window.app && window.app.snapEngine) {
+      window.app.snapEngine.applyN2OResonanceState(compound, stateIndex);
+    }
+    var bounds = compound.getBounds();
+    restoreCompoundVisualState(compound, snapshot);
+    return bounds;
+  }
+
   function getCompoundLabelPlacementBounds(compound) {
     if (compoundHasNDativeResonance(compound)) {
       var state0 = getBoundsForNDativeResonanceState(compound, 0);
@@ -3421,6 +3495,11 @@
       var ozone0 = getBoundsForOzoneResonanceState(compound, 0);
       var ozone1 = getBoundsForOzoneResonanceState(compound, 1);
       return unionVisualBounds(ozone0, ozone1);
+    }
+    if (compound.n2oActive && isNitrousOxideOnly(compound)) {
+      var n2o0 = getBoundsForN2OResonanceState(compound, 0);
+      var n2o1 = getBoundsForN2OResonanceState(compound, 1);
+      return unionVisualBounds(n2o0, n2o1);
     }
     return compound.getBounds();
   }
@@ -3463,11 +3542,30 @@
     return false;
   }
 
+  function isSulfurOxoExportBond(bond, resonanceHubs) {
+    if (bond.order === 's_dative') return true;
+    var hubs = normalizeNDativeResonanceHubs(resonanceHubs);
+    for (var i = 0; i < hubs.length; i++) {
+      if (!hubs[i].nitrogen || hubs[i].nitrogen.element !== 'S' || !hubs[i].hub) continue;
+      var hub = hubs[i].hub;
+      if (hub.receiverBondId === bond.id || hub.type2BondId === bond.id ||
+          hub.type3BondId === bond.id) return true;
+    }
+    return false;
+  }
+
   function molExportBondOrder(compound, bond, resonanceHubs) {
+    if (compound.n2oActive && isNitrousOxideOnly(compound)) {
+      var n2oChain = getNitrousOxideChain(compound);
+      if (n2oChain) {
+        if (bond.id === n2oChain.bondNN.id) return 3;
+        if (bond.id === n2oChain.bondNO.id) return 1;
+      }
+    }
     if (bond.order === 'cl_dative') return 1;
     if (bond.order === 'n_dative') return 1;
     if (bond.order === 'p_dative') return 1;
-    if (bond.order === 's_dative') return 1;
+    if (isSulfurOxoExportBond(bond, resonanceHubs)) return 2;
     if (isNDativeResonanceReceiverBond(bond, resonanceHubs)) return 1;
     if (isNDativeResonanceType2Bond(bond, resonanceHubs)) return 2;
     if (bond.order === 'co_dative') return 3;
@@ -3484,6 +3582,7 @@
     } else if (bond.order === 'n_dative' ||
         isNDativeResonanceReceiverBond(bond, resonanceHubs)) {
       var noEnds = getNoBondEnds(bond);
+      if (noEnds.nitrogen.element === 'S') return entries;
       entries.push(
         { idx: atomIndex.get(noEnds.nitrogen.id), charge: 1 },
         { idx: atomIndex.get(noEnds.oxygen.id), charge: -1 });
@@ -3497,11 +3596,6 @@
       entries.push(
         { idx: atomIndex.get(poChargeEnds.phosphorus.id), charge: 1 },
         { idx: atomIndex.get(poChargeEnds.oxygen.id), charge: -1 });
-    } else if (bond.order === 's_dative') {
-      var soChargeEnds = getSOBondEnds(bond);
-      entries.push(
-        { idx: atomIndex.get(soChargeEnds.sulfur.id), charge: 1 },
-        { idx: atomIndex.get(soChargeEnds.oxygen.id), charge: -1 });
     }
     return entries;
   }
@@ -3934,6 +4028,904 @@
     return usable(result.name) || usable(result.iupacName);
   }
 
+  var TASK_DISCOVERED_KEY = 'molecular-editor-tasks-discovered';
+  var TASK_STAR_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.47 5.77 6.3.7-4.72 4.18 1.32 6.23L12 16.7 6.63 19.68l1.32-6.23-4.72-4.18 6.3-.7L12 2.8z"/></svg>';
+  var TASK_CLASSES = [
+    {
+      id: 'mononuclear-diatomics',
+      title: 'Mononuclear diatomics',
+      instructionKind: 'formula',
+      pairRule: 'same',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'h2',
+          formula: 'H2',
+          name: 'Hydrogen',
+          cid: 783,
+          atomCount: 2,
+          summary: 'Hydrogen gas is the lightest molecule and the main fuel of stars. On Earth it is a feedstock for ammonia fertilizer and an emerging carbon-free fuel.',
+        },
+        {
+          id: 'n2',
+          formula: 'N2',
+          name: 'Nitrogen',
+          cid: 947,
+          atomCount: 2,
+          summary: 'Nitrogen makes up most of the air we breathe. Its triple bond is so stable that turning N₂ into fertilizer takes the industrial Haber–Bosch process — and a large share of global energy.',
+        },
+        {
+          id: 'o2',
+          formula: 'O2',
+          name: 'Oxygen',
+          cid: 977,
+          atomCount: 2,
+          summary: 'Oxygen is the breathable fraction of air and the waste product of photosynthesis. It is also what makes ordinary fire possible.',
+        },
+        {
+          id: 'f2',
+          formula: 'F2',
+          name: 'Fluorine',
+          cid: 24524,
+          atomCount: 2,
+          summary: 'Elemental fluorine is the most reactive of all elements. Industry uses it to make uranium hexafluoride for enrichment and to fluorinate organics; it attacks almost everything, including glass.',
+        },
+        {
+          id: 'cl2',
+          formula: 'Cl2',
+          name: 'Chlorine',
+          cid: 24526,
+          atomCount: 2,
+          summary: 'Chlorine gas disinfects drinking water and is used to make PVC. It is a choking, green-yellow gas and was one of the first chemical weapons.',
+        },
+        {
+          id: 'p2',
+          formula: 'P2',
+          name: 'Diphosphorus',
+          cid: 5460700,
+          atomCount: 2,
+          summary: 'Diphosphorus is the nitrogen-like form of phosphorus, a triple-bonded gas that appears when P₄ is heated. It is a reactive intermediate in some organophosphorus chemistry and shows up in stellar atmospheres.',
+        },
+        {
+          id: 's2',
+          formula: 'S2',
+          name: 'Disulfur',
+          cid: 5460602,
+          atomCount: 2,
+          summary: 'Disulfur is the oxygen analog of sulfur: a violet gas that dominates hot sulfur vapor. It is a minor component of volcanic atmospheres, including Io’s, and is rarely seen at room temperature.',
+        },
+      ],
+    },
+    {
+      id: 'heteronuclear-diatomics',
+      title: 'Heteronuclear diatomics',
+      instructionKind: 'formula',
+      pairRule: 'different',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'hf',
+          formula: 'HF',
+          name: 'Hydrogen fluoride',
+          cid: 14917,
+          atomCount: 2,
+          summary: 'Hydrogen fluoride etches glass and is a key reagent for Teflon, refrigerants, and aluminum production. In water it is hydrofluoric acid, which can penetrate tissue.',
+        },
+        {
+          id: 'hcl',
+          formula: 'HCl',
+          name: 'Hydrogen chloride',
+          cid: 313,
+          atomCount: 2,
+          summary: 'Hydrogen chloride dissolves in water as hydrochloric acid — the acid in your stomach. Industrially it pickles steel and helps make vinyl chloride.',
+        },
+        {
+          id: 'co',
+          formula: 'CO',
+          name: 'Carbon monoxide',
+          cid: 281,
+          atomCount: 2,
+          summary: 'Carbon monoxide forms when fuels burn with too little oxygen. It binds hemoglobin more tightly than O₂, which is why it is lethal in poorly ventilated fires; it is also a bulk syngas chemical.',
+        },
+        {
+          id: 'clf',
+          formula: 'ClF',
+          name: 'Chlorine fluoride',
+          cid: 123266,
+          atomCount: 2,
+          summary: 'Chlorine fluoride is an interhalogen gas and a vigorous fluorinating agent. Related chlorine fluorides are used where ordinary oxidizers are not aggressive enough.',
+        },
+        {
+          id: 'cs',
+          formula: 'CS',
+          name: 'Carbon monosulfide',
+          cid: 108054,
+          atomCount: 2,
+          summary: 'Carbon monosulfide is the sulfur analog of CO. It is a reactive gas seen in electrical discharges through CS₂ and is a familiar species in interstellar clouds.',
+        },
+        {
+          id: 'pn',
+          formula: 'PN',
+          name: 'Phosphorus mononitride',
+          cid: 117441,
+          atomCount: 2,
+          summary: 'Phosphorus mononitride is a triple-bonded cousin of N₂ and CO. It appears in stellar atmospheres and is a standard target in astrochemistry.',
+        },
+        {
+          id: 'so',
+          formula: 'SO',
+          name: 'Sulfur monoxide',
+          cid: 114845,
+          atomCount: 2,
+          summary: 'Sulfur monoxide is a short-lived cousin of O₂, formed in combustion and in volcanic and interstellar gas. On Earth it quickly oxidizes further.',
+        },
+      ],
+    },
+    {
+      id: 'hydrides',
+      title: 'Hydrides',
+      instructionKind: 'formula',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'h2o',
+          formula: 'H2O',
+          name: 'Water',
+          cid: 962,
+          atomCount: 3,
+          summary: 'Water covers most of Earth’s surface and makes up most of a living cell. It is the solvent of biochemistry and the working fluid of weather and industry.',
+        },
+        {
+          id: 'h2s',
+          formula: 'H2S',
+          name: 'Hydrogen sulfide',
+          cid: 402,
+          atomCount: 3,
+          summary: 'Hydrogen sulfide is the gas that smells like rotten eggs. It is produced by decaying organic matter and some microbes, and it is toxic at surprisingly low concentrations.',
+        },
+        {
+          id: 'nh3',
+          formula: 'NH3',
+          name: 'Ammonia',
+          cid: 222,
+          atomCount: 4,
+          summary: 'Ammonia is the product of the Haber–Bosch process and the starting point for most fertilizers. It is a sharp-smelling gas, and aqueous ammonia is household cleaner.',
+        },
+        {
+          id: 'ph3',
+          formula: 'PH3',
+          name: 'Phosphine',
+          cid: 24404,
+          atomCount: 4,
+          summary: 'Phosphine is a toxic, garlic-smelling gas used as a fumigant and in semiconductor doping. It is also a debated spectroscopic marker in planetary atmospheres.',
+        },
+        {
+          id: 'ch4',
+          formula: 'CH4',
+          name: 'Methane',
+          cid: 297,
+          atomCount: 5,
+          summary: 'Methane is the main component of natural gas and a potent greenhouse gas. Cows, wetlands, and gas wells all release it; it is also the simplest hydrocarbon.',
+        },
+      ],
+    },
+    {
+      id: 'oxides',
+      title: 'Oxides',
+      instructionKind: 'formula',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'co2',
+          formula: 'CO2',
+          name: 'Carbon dioxide',
+          cid: 280,
+          atomCount: 3,
+          summary: 'Carbon dioxide is what we exhale and what plants fix into sugar. It is the main greenhouse gas from burning fossil fuels, and dry ice is the solid form.',
+        },
+        {
+          id: 'so2',
+          formula: 'SO2',
+          name: 'Sulfur dioxide',
+          cid: 1119,
+          atomCount: 3,
+          summary: 'Sulfur dioxide is the sharp smell of struck matches and volcanoes. It is used to preserve wine and dried fruit, and it is a major cause of acid rain.',
+        },
+        {
+          id: 'o3',
+          formula: 'O3',
+          name: 'Ozone',
+          cid: 24823,
+          atomCount: 3,
+          summary: 'Ozone in the stratosphere blocks ultraviolet sunlight. At ground level the same molecule is a lung irritant and a component of smog.',
+        },
+        {
+          id: 'n2o',
+          formula: 'N2O',
+          name: 'Nitrous oxide',
+          cid: 948,
+          atomCount: 3,
+          summary: 'Nitrous oxide is laughing gas: an old anaesthetic and a whipped-cream propellant. It is also a long-lived greenhouse gas from agriculture.',
+        },
+        {
+          id: 'cl2o',
+          formula: 'Cl2O',
+          name: 'Dichlorine monoxide',
+          cid: 24646,
+          atomCount: 3,
+          summary: 'Dichlorine monoxide is a yellow-red gas and the anhydride of hypochlorous acid. It is used to make chlorinating reagents and bleach chemicals.',
+        },
+        {
+          id: 'of2',
+          formula: 'OF2',
+          name: 'Oxygen difluoride',
+          cid: 24547,
+          atomCount: 3,
+          summary: 'Oxygen difluoride is a potent oxidizer once studied as a rocket propellant. It is one of the few compounds in which oxygen is the more positive partner of fluorine.',
+        },
+      ],
+    },
+    {
+      id: 'halides',
+      title: 'Halides',
+      instructionKind: 'formula',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'cf4',
+          formula: 'CF4',
+          name: 'Carbon tetrafluoride',
+          cid: 6393,
+          atomCount: 5,
+          summary: 'Carbon tetrafluoride is a very stable greenhouse gas and a plasma etchant in chip-making. It is also sold as the refrigerant Freon-14.',
+        },
+        {
+          id: 'nf3',
+          formula: 'NF3',
+          name: 'Nitrogen trifluoride',
+          cid: 24553,
+          atomCount: 4,
+          summary: 'Nitrogen trifluoride is used to clean semiconductor chambers. It is a potent greenhouse gas, far stronger per molecule than CO₂.',
+        },
+        {
+          id: 'pf3',
+          formula: 'PF3',
+          name: 'Phosphorus trifluoride',
+          cid: 24604,
+          atomCount: 4,
+          summary: 'Phosphorus trifluoride binds metals much like carbon monoxide. It is a colorless, highly toxic gas and a ligand in organometallic chemistry.',
+        },
+        {
+          id: 'clf3',
+          formula: 'ClF3',
+          name: 'Chlorine trifluoride',
+          cid: 66217,
+          atomCount: 4,
+          summary: 'Chlorine trifluoride is one of the most aggressive fluorinating agents known. It ignites asbestos, concrete, and many metals, and was once tested as a rocket oxidizer.',
+        },
+        {
+          id: 'ccl4',
+          formula: 'CCl4',
+          name: 'Carbon tetrachloride',
+          cid: 5943,
+          atomCount: 5,
+          summary: 'Carbon tetrachloride was a common dry-cleaning solvent and fire-extinguisher fluid. It is toxic to the liver and is now tightly restricted.',
+        },
+      ],
+    },
+    {
+      id: 'hydrocarbons',
+      title: 'Hydrocarbons',
+      instructionKind: 'formula',
+      cardsPerRow: 3,
+      compounds: [
+        {
+          id: 'c2h2',
+          formula: 'C2H2',
+          name: 'Acetylene',
+          cid: 6326,
+          atomCount: 4,
+          summary: 'Acetylene is the triple-bonded gas used in welding torches. It is also the starting point for many vinyl plastics and solvents.',
+        },
+        {
+          id: 'c2h4',
+          formula: 'C2H4',
+          name: 'Ethylene',
+          cid: 6325,
+          atomCount: 6,
+          summary: 'Ethylene is the simplest alkene and one of the largest-volume industrial chemicals. Plants also use it as a hormone to ripen fruit.',
+        },
+        {
+          id: 'c2h6',
+          formula: 'C2H6',
+          name: 'Ethane',
+          cid: 6324,
+          atomCount: 8,
+          summary: 'Ethane is the two-carbon alkane in natural gas. Industry cracks it to make ethylene, the feedstock for polyethylene.',
+        },
+        {
+          id: 'c6h6',
+          formula: 'C6H6',
+          name: 'Benzene',
+          cid: 241,
+          atomCount: 12,
+          summary: 'Benzene is the parent aromatic ring: six carbons sharing electrons in a circle. It is a feedstock for plastics and a long-known carcinogen.',
+        },
+      ],
+    },
+    {
+      id: 'cns-stimulants',
+      title: 'Central nervous system stimulants',
+      instructionKind: 'formula',
+      showFunctionalGroups: true,
+      cardsPerRow: 2,
+      compounds: [
+        {
+          id: 'amphetamine',
+          formula: 'C9H13N',
+          name: 'Amphetamine',
+          cid: 3007,
+          atomCount: 23,
+          summary: 'Amphetamine is a phenethylamine stimulant used medically for ADHD and narcolepsy. It increases alertness by raising dopamine and norepinephrine signaling.',
+        },
+        {
+          id: 'ephedrine',
+          formula: 'C10H15NO',
+          name: 'Ephedrine',
+          cid: 9294,
+          atomCount: 27,
+          summary: 'Ephedrine is a plant alkaloid from Ephedra, long used as a decongestant and to raise blood pressure. It is a hydroxylated cousin of methamphetamine.',
+        },
+        {
+          id: 'mephedrone',
+          formula: 'C11H15NO',
+          name: 'Mephedrone',
+          cid: 45266826,
+          atomCount: 28,
+          summary: 'Mephedrone is a synthetic cathinone, sometimes called 4-MMC. It is a β-keto amphetamine analog that appeared as a “legal high” in the late 2000s.',
+        },
+        {
+          id: 'methamphetamine',
+          formula: 'C10H15N',
+          name: 'Methamphetamine',
+          cid: 10836,
+          atomCount: 26,
+          summary: 'Methamphetamine is the N-methyl analog of amphetamine. It is a potent CNS stimulant, prescribed in rare cases and widely known as a drug of abuse.',
+        },
+        {
+          id: 'phenylpropanolamine',
+          formula: 'C9H13NO',
+          name: 'Phenylpropanolamine',
+          cid: 4786,
+          atomCount: 24,
+          summary: 'Phenylpropanolamine is norephedrine: ephedrine without the N-methyl group. It was used as a decongestant and appetite suppressant before being withdrawn in many countries.',
+        },
+        {
+          id: 'lisdexamfetamine',
+          formula: 'C15H25N3O',
+          name: 'Lisdexamfetamine',
+          cid: 11597698,
+          atomCount: 44,
+          summary: 'Lisdexamfetamine is a lysine-linked prodrug of dextroamphetamine. It is inactive until enzymes cleave it, which is why it is used as a longer-acting ADHD medicine.',
+        },
+        {
+          id: 'pseudoephedrine',
+          formula: 'C10H15NO',
+          name: 'Pseudoephedrine',
+          cid: 7028,
+          atomCount: 27,
+          summary: 'Pseudoephedrine is a stereoisomer of ephedrine and a common oral decongestant. It has the same connectivity as ephedrine but a different 3D arrangement of the OH and methylamine.',
+        },
+        {
+          id: 'cathinone',
+          formula: 'C9H11NO',
+          name: 'Cathinone',
+          cid: 62258,
+          atomCount: 22,
+          summary: 'Cathinone is the main stimulant alkaloid of khat leaves. It is a β-keto analog of amphetamine and the parent structure of the synthetic cathinones.',
+        },
+        {
+          id: 'modafinil',
+          formula: 'C15H15NO2S',
+          name: 'Modafinil',
+          cid: 4236,
+          atomCount: 34,
+          summary: 'Modafinil is a wakefulness-promoting drug used for narcolepsy. Unlike classic amphetamines it is a sulfinylacetamide with two phenyl rings.',
+        },
+      ],
+    },
+    {
+      id: 'amino-acids',
+      title: 'Amino acids',
+      instructionKind: 'formula',
+      showFunctionalGroups: true,
+      cardsPerRow: 2,
+      compounds: [
+        {
+          id: 'glycine',
+          formula: 'C2H5NO2',
+          name: 'Glycine',
+          cid: 750,
+          atomCount: 10,
+          summary: 'Glycine is the smallest amino acid: just a hydrogen for a side chain. It is common in collagen and is also an inhibitory neurotransmitter.',
+        },
+        {
+          id: 'alanine',
+          formula: 'C3H7NO2',
+          name: 'Alanine',
+          cid: 5950,
+          atomCount: 13,
+          summary: 'Alanine has a methyl side chain and is one of the most common residues in proteins. Cells also use it to shuttle nitrogen between muscle and liver.',
+        },
+        {
+          id: 'serine',
+          formula: 'C3H7NO3',
+          name: 'Serine',
+          cid: 5951,
+          atomCount: 14,
+          summary: 'Serine carries a CH₂OH side chain. Its hydroxyl is a frequent phosphorylation site and a nucleophile in many enzyme active sites.',
+        },
+        {
+          id: 'cysteine',
+          formula: 'C3H7NO2S',
+          name: 'Cysteine',
+          cid: 5862,
+          atomCount: 14,
+          summary: 'Cysteine has a thiol side chain that can form disulfide bridges. Those S–S links help lock many extracellular proteins into shape.',
+        },
+        {
+          id: 'threonine',
+          formula: 'C4H9NO3',
+          name: 'Threonine',
+          cid: 6288,
+          atomCount: 17,
+          summary: 'Threonine is a β-hydroxy amino acid and an essential nutrient in humans. Like serine, it is often phosphorylated in cell signaling.',
+        },
+        {
+          id: 'valine',
+          formula: 'C5H11NO2',
+          name: 'Valine',
+          cid: 6287,
+          atomCount: 19,
+          summary: 'Valine is a branched-chain essential amino acid with an isopropyl side chain. It is abundant in muscle proteins and in hemoglobin.',
+        },
+        {
+          id: 'leucine',
+          formula: 'C6H13NO2',
+          name: 'Leucine',
+          cid: 6106,
+          atomCount: 22,
+          summary: 'Leucine is an essential branched-chain amino acid with an isobutyl side chain. It is a strong signal for muscle protein synthesis.',
+        },
+        {
+          id: 'isoleucine',
+          formula: 'C6H13NO2',
+          name: 'Isoleucine',
+          cid: 6306,
+          atomCount: 22,
+          summary: 'Isoleucine is the sec-butyl isomer of leucine. It is essential in the diet and, like the other branched-chain amino acids, is metabolized mainly in muscle.',
+        },
+        {
+          id: 'methionine',
+          formula: 'C5H11NO2S',
+          name: 'Methionine',
+          cid: 6137,
+          atomCount: 20,
+          summary: 'Methionine is the usual start amino acid in protein synthesis and a source of methyl groups via SAM. Its side chain ends in a thioether.',
+        },
+        {
+          id: 'phenylalanine',
+          formula: 'C9H11NO2',
+          name: 'Phenylalanine',
+          cid: 6140,
+          atomCount: 23,
+          summary: 'Phenylalanine is an essential amino acid with a benzyl side chain. It is the precursor of tyrosine, dopamine, and several other signaling molecules.',
+        },
+        {
+          id: 'tyrosine',
+          formula: 'C9H11NO3',
+          name: 'Tyrosine',
+          cid: 6057,
+          atomCount: 24,
+          summary: 'Tyrosine is phenylalanine with a para-OH on the ring. It is the precursor of thyroid hormones, melanin, and the catecholamine neurotransmitters.',
+        },
+        {
+          id: 'aspartic-acid',
+          formula: 'C4H7NO4',
+          name: 'Aspartic acid',
+          cid: 5960,
+          atomCount: 16,
+          summary: 'Aspartic acid has a short carboxylic side chain and is negatively charged at physiological pH. It is a node in amino-acid and nucleotide biosynthesis.',
+        },
+        {
+          id: 'glutamic-acid',
+          formula: 'C5H9NO4',
+          name: 'Glutamic acid',
+          cid: 33032,
+          atomCount: 19,
+          summary: 'Glutamic acid (glutamate) is the main excitatory neurotransmitter in the brain. Its side chain is one carbon longer than aspartic acid.',
+        },
+        {
+          id: 'asparagine',
+          formula: 'C4H8N2O3',
+          name: 'Asparagine',
+          cid: 6267,
+          atomCount: 17,
+          summary: 'Asparagine is the amide of aspartic acid. It is a common N-glycosylation site in proteins and was the first amino acid isolated, from asparagus.',
+        },
+        {
+          id: 'glutamine',
+          formula: 'C5H10N2O3',
+          name: 'Glutamine',
+          cid: 5961,
+          atomCount: 20,
+          summary: 'Glutamine is the amide of glutamic acid and the most abundant free amino acid in blood. Cells use it to shuttle nitrogen and feed biosynthesis.',
+        },
+      ],
+    },
+    {
+      id: 'neurotransmitters',
+      title: 'Neurotransmitters',
+      instructionKind: 'formula',
+      showFunctionalGroups: true,
+      cardsPerRow: 2,
+      compounds: [
+        {
+          id: 'dopamine',
+          formula: 'C8H11NO2',
+          name: 'Dopamine',
+          cid: 681,
+          atomCount: 22,
+          summary: 'Dopamine is the catecholamine behind reward, movement, and attention. Loss of dopamine neurons in the substantia nigra is the hallmark of Parkinson’s disease.',
+        },
+        {
+          id: 'gaba',
+          formula: 'C4H9NO2',
+          name: 'GABA',
+          cid: 119,
+          atomCount: 16,
+          summary: 'GABA (γ-aminobutyric acid) is the main inhibitory neurotransmitter in the adult brain. Many sedatives and anticonvulsants work by strengthening GABA signaling.',
+        },
+        {
+          id: 'met-enkephalin',
+          formula: 'C27H35N5O7S',
+          name: 'Met-enkephalin',
+          cid: 443363,
+          atomCount: 75,
+          summary: 'Met-enkephalin is the endogenous opioid pentapeptide Tyr–Gly–Gly–Phe–Met. It binds delta and mu opioid receptors and is one of the brain’s own morphine-like signals.',
+        },
+        {
+          id: 'leu-enkephalin',
+          formula: 'C28H37N5O7',
+          name: 'Leu-enkephalin',
+          cid: 461776,
+          atomCount: 77,
+          summary: 'Leu-enkephalin is the sister pentapeptide Tyr–Gly–Gly–Phe–Leu. It differs from Met-enkephalin only at the last residue and likewise acts as an endogenous opioid.',
+        },
+      ],
+    },
+    {
+      id: 'nsaids',
+      title: 'Nonsteroidal anti-inflammatory drugs',
+      instructionKind: 'formula',
+      showFunctionalGroups: true,
+      cardsPerRow: 2,
+      compounds: [
+        {
+          id: 'aspirin',
+          formula: 'C9H8O4',
+          name: 'Aspirin',
+          cid: 2244,
+          atomCount: 21,
+          summary: 'Aspirin is acetylsalicylic acid, the original NSAID. It irreversibly blocks COX-1 in platelets, which is why a low dose is used to prevent clots.',
+        },
+        {
+          id: 'diflunisal',
+          formula: 'C13H8F2O3',
+          name: 'Diflunisal',
+          cid: 3059,
+          atomCount: 26,
+          summary: 'Diflunisal is a difluorophenyl derivative of salicylic acid. It is a longer-acting analgesic and anti-inflammatory than aspirin and is not metabolized to salicylate.',
+        },
+        {
+          id: 'ethenzamide',
+          formula: 'C9H11NO2',
+          name: 'Ethenzamide',
+          cid: 3282,
+          atomCount: 23,
+          summary: 'Ethenzamide is the 2-ethoxy amide of salicylic acid, used as a mild analgesic and antipyretic, often in combination cold remedies.',
+        },
+        {
+          id: 'salicylamide',
+          formula: 'C7H7NO2',
+          name: 'Salicylamide',
+          cid: 5147,
+          atomCount: 17,
+          summary: 'Salicylamide is the simple amide of salicylic acid. It is an over-the-counter analgesic and antipyretic, sometimes paired with aspirin and caffeine.',
+        },
+        {
+          id: 'salicylic-acid',
+          formula: 'C7H6O3',
+          name: 'Salicylic acid',
+          cid: 338,
+          atomCount: 16,
+          summary: 'Salicylic acid is the parent salicylate: a phenol next to a carboxylic acid on benzene. It is used on skin to peel warts and acne, and it is the scaffold of aspirin.',
+        },
+        {
+          id: 'salsalate',
+          formula: 'C14H10O5',
+          name: 'Salsalate',
+          cid: 5161,
+          atomCount: 29,
+          summary: 'Salsalate is two salicylic acids joined as an ester. It is a prodrug that releases salicylate and has been used for rheumatoid arthritis and osteoarthritis.',
+        },
+        {
+          id: 'methyl-salicylate',
+          formula: 'C8H8O3',
+          name: 'Methyl salicylate',
+          cid: 4133,
+          atomCount: 19,
+          summary: 'Methyl salicylate is oil of wintergreen. It is a fragrant ester used in liniments; swallowed in quantity it is a dangerous source of salicylate.',
+        },
+        {
+          id: 'ibuprofen',
+          formula: 'C13H18O2',
+          name: 'Ibuprofen',
+          cid: 3672,
+          atomCount: 33,
+          summary: 'Ibuprofen is a propionic-acid NSAID sold for pain, fever, and inflammation. The S-enantiomer is the more active COX inhibitor.',
+        },
+        {
+          id: 'dexibuprofen',
+          formula: 'C13H18O2',
+          name: 'Dexibuprofen',
+          cid: 39912,
+          atomCount: 33,
+          summary: 'Dexibuprofen is the single S-enantiomer of ibuprofen. It has the same connectivity as ibuprofen and is marketed as a more potent, better-tolerated form.',
+        },
+        {
+          id: 'ketoprofen',
+          formula: 'C16H14O3',
+          name: 'Ketoprofen',
+          cid: 3825,
+          atomCount: 33,
+          summary: 'Ketoprofen is a benzoyl-substituted propionic-acid NSAID used for arthritis and acute pain. It is also applied as a topical gel.',
+        },
+        {
+          id: 'dexketoprofen',
+          formula: 'C16H14O3',
+          name: 'Dexketoprofen',
+          cid: 667550,
+          atomCount: 33,
+          summary: 'Dexketoprofen is the S-enantiomer of ketoprofen. It is used for short-term pain such as dental, muscle, and menstrual pain.',
+        },
+        {
+          id: 'flurbiprofen',
+          formula: 'C15H13FO2',
+          name: 'Flurbiprofen',
+          cid: 3394,
+          atomCount: 31,
+          summary: 'Flurbiprofen is a fluorinated biphenyl propionic-acid NSAID. It is used for arthritis and, as eye drops, to prevent pupil constriction during surgery.',
+        },
+        {
+          id: 'fenbufen',
+          formula: 'C16H14O3',
+          name: 'Fenbufen',
+          cid: 3335,
+          atomCount: 33,
+          summary: 'Fenbufen is a biphenyl keto-acid prodrug. The body converts it to an active biphenylacetic acid that inhibits cyclooxygenase.',
+        },
+        {
+          id: 'diclofenac',
+          formula: 'C14H11Cl2NO2',
+          name: 'Diclofenac',
+          cid: 3033,
+          atomCount: 30,
+          summary: 'Diclofenac is a dichlorophenyl acetic-acid NSAID used as tablets, gels, and injections. It is potent but has well-known heart and stomach risks.',
+        },
+        {
+          id: 'fenclofenac',
+          formula: 'C14H10Cl2O3',
+          name: 'Fenclofenac',
+          cid: 65394,
+          atomCount: 29,
+          summary: 'Fenclofenac is a dichlorophenoxy phenylacetic acid formerly used for rheumatoid arthritis. It was withdrawn after reports of skin reactions.',
+        },
+        {
+          id: 'aceclofenac',
+          formula: 'C16H13Cl2NO4',
+          name: 'Aceclofenac',
+          cid: 71771,
+          atomCount: 36,
+          summary: 'Aceclofenac is the carboxymethyl ester of diclofenac. It was designed for better stomach tolerance and is used for osteoarthritis and rheumatoid arthritis.',
+        },
+        {
+          id: 'mefenamic-acid',
+          formula: 'C15H15NO2',
+          name: 'Mefenamic acid',
+          cid: 4044,
+          atomCount: 33,
+          summary: 'Mefenamic acid is a fenamate NSAID: an anthranilic acid with a xylidine ring. It is often used for menstrual pain.',
+        },
+        {
+          id: 'meclofenamic-acid',
+          formula: 'C14H11Cl2NO2',
+          name: 'Meclofenamic acid',
+          cid: 4037,
+          atomCount: 30,
+          summary: 'Meclofenamic acid is the 2,6-dichloro fenamate. It is used for arthritis and mild-to-moderate pain, including menstrual cramps.',
+        },
+        {
+          id: 'flufenamic-acid',
+          formula: 'C14H10F3NO2',
+          name: 'Flufenamic acid',
+          cid: 3371,
+          atomCount: 30,
+          summary: 'Flufenamic acid is a trifluoromethyl fenamate. Besides COX inhibition it is a research tool for ion channels and inflammation pathways.',
+        },
+        {
+          id: 'tolfenamic-acid',
+          formula: 'C14H12ClNO2',
+          name: 'Tolfenamic acid',
+          cid: 610479,
+          atomCount: 30,
+          summary: 'Tolfenamic acid is a chloro-methyl fenamate used for migraine and other inflammatory pain. It is one of the NSAIDs considered safer for Old World vultures.',
+        },
+        {
+          id: 'etofenamate',
+          formula: 'C18H18F3NO4',
+          name: 'Etofenamate',
+          cid: 35375,
+          atomCount: 44,
+          summary: 'Etofenamate is the glycol-ether ester of flufenamic acid, made for topical gels. It is applied to muscle and joint pain rather than taken by mouth.',
+        },
+        {
+          id: 'lumiracoxib',
+          formula: 'C15H13ClFNO2',
+          name: 'Lumiracoxib',
+          cid: 151166,
+          atomCount: 33,
+          summary: 'Lumiracoxib is a COX-2–selective analog of diclofenac. It was withdrawn in many countries after reports of serious liver injury.',
+        },
+        {
+          id: 'etoricoxib',
+          formula: 'C18H15ClN2O2S',
+          name: 'Etoricoxib',
+          cid: 123619,
+          atomCount: 39,
+          summary: 'Etoricoxib is a diaryl COX-2 inhibitor with a chloropyridine and a methylsulfone. It is used for arthritis and gout in countries where it remains approved.',
+        },
+        {
+          id: 'robenacoxib',
+          formula: 'C16H13F4NO2',
+          name: 'Robenacoxib',
+          cid: 6433107,
+          atomCount: 36,
+          summary: 'Robenacoxib is a tetrafluoro COX-2 inhibitor used in veterinary medicine (Onsior) for pain and inflammation in cats and dogs.',
+        },
+        {
+          id: 'nimesulide',
+          formula: 'C13H12N2O5S',
+          name: 'Nimesulide',
+          cid: 4495,
+          atomCount: 33,
+          summary: 'Nimesulide is a COX-2–preferential sulfonanilide used for acute pain. Liver-toxicity concerns have led many countries to withdraw or restrict it.',
+        },
+      ],
+    },
+  ];
+
+  function normalizeTaskFormula(formula) {
+    if (!formula) return '';
+    return String(formula).replace(/[₀₁₂₃₄₅₆₇₈₉]/g, function (digit) {
+      return String('₀₁₂₃₄₅₆₇₈₉'.indexOf(digit));
+    }).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  }
+
+  var TASK_FORMULA_ELEMENTS = ['CL', 'H', 'C', 'N', 'O', 'F', 'P', 'S'];
+
+  function taskFormulaBag(formula) {
+    var s = normalizeTaskFormula(formula);
+    var bag = {};
+    var i = 0;
+    while (i < s.length) {
+      var el = null;
+      for (var e = 0; e < TASK_FORMULA_ELEMENTS.length; e++) {
+        if (s.indexOf(TASK_FORMULA_ELEMENTS[e], i) === i) {
+          el = TASK_FORMULA_ELEMENTS[e];
+          break;
+        }
+      }
+      if (!el) {
+        i += 1;
+        continue;
+      }
+      i += el.length;
+      var n = 0;
+      while (i < s.length && s.charAt(i) >= '0' && s.charAt(i) <= '9') {
+        n = n * 10 + (s.charCodeAt(i) - 48);
+        i += 1;
+      }
+      bag[el] = (bag[el] || 0) + (n || 1);
+    }
+    return bag;
+  }
+
+  function taskFormulaBagsMatch(a, b) {
+    var keys = Object.keys(a);
+    if (keys.length !== Object.keys(b).length) return false;
+    for (var i = 0; i < keys.length; i++) {
+      if (a[keys[i]] !== b[keys[i]]) return false;
+    }
+    return keys.length > 0;
+  }
+
+  function loadDiscoveredTaskIds() {
+    try {
+      var raw = window.localStorage.getItem(TASK_DISCOVERED_KEY);
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return {};
+      var map = {};
+      for (var i = 0; i < parsed.length; i++) map[parsed[i]] = true;
+      return map;
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function saveDiscoveredTaskIds(map) {
+    try {
+      window.localStorage.setItem(TASK_DISCOVERED_KEY, JSON.stringify(Object.keys(map)));
+    } catch (err) {}
+  }
+
+  function findTaskById(id) {
+    for (var ci = 0; ci < TASK_CLASSES.length; ci++) {
+      var compounds = TASK_CLASSES[ci].compounds;
+      for (var i = 0; i < compounds.length; i++) {
+        if (compounds[i].id === id) {
+          return { taskClass: TASK_CLASSES[ci], task: compounds[i] };
+        }
+      }
+    }
+    return null;
+  }
+
+  function matchTaskForCompound(compound) {
+    if (!compound || !compound.metadata) return null;
+    var meta = compound.metadata;
+    var formula = normalizeTaskFormula(meta.molecularFormula);
+    var atomCount = compound.atoms ? compound.atoms.length : 0;
+    var sameElement = atomCount === 2 &&
+      compound.atoms[0].element === compound.atoms[1].element;
+    var cid = meta.cid != null ? String(meta.cid) : '';
+    for (var ci = 0; ci < TASK_CLASSES.length; ci++) {
+      var taskClass = TASK_CLASSES[ci];
+      var compounds = taskClass.compounds;
+      for (var i = 0; i < compounds.length; i++) {
+        var task = compounds[i];
+        if (taskClass.pairRule === 'same' && !sameElement) continue;
+        if (taskClass.pairRule === 'different' && (atomCount !== 2 || sameElement)) continue;
+        if (task.cid != null && cid && String(task.cid) === cid) return task;
+        if (task.atomCount && atomCount !== task.atomCount) continue;
+        if (formula && (formula === normalizeTaskFormula(task.formula) ||
+            taskFormulaBagsMatch(taskFormulaBag(formula), taskFormulaBag(task.formula)))) {
+          return task;
+        }
+      }
+    }
+    return null;
+  }
+
+  function announceCompoundIdentified(compound, displayName, onStatusChange) {
+    if (window.app && window.app.tasksPanel) {
+      window.app.tasksPanel.recordDiscovery(compound);
+    }
+    if (onStatusChange) {
+      onStatusChange('Identified: ' + displayName);
+    }
+  }
+
   function restoreNitrogenFromRemainingBonds(nitrogen, compound, loneSlot, electronResolver) {
     for (var i = 0; i < compound.bonds.length; i++) {
       var bond = compound.bonds[i];
@@ -4055,6 +5047,243 @@
     }
     if (!bondLeft || !bondRight) return null;
     return { left: left, center: center, right: right, bondLeft: bondLeft, bondRight: bondRight };
+  }
+
+  function isNitrousOxideOnly(compound) {
+    if (!compound || compound.atoms.length !== 3 || compound.bonds.length !== 2) return false;
+    var nCount = 0;
+    var oCount = 0;
+    for (var i = 0; i < compound.atoms.length; i++) {
+      var el = compound.atoms[i].element;
+      if (el === 'N') nCount += 1;
+      else if (el === 'O') oCount += 1;
+      else return false;
+    }
+    if (nCount !== 2 || oCount !== 1) return false;
+    var centerN = null;
+    var terminalN = null;
+    var oxygen = null;
+    for (var ai = 0; ai < compound.atoms.length; ai++) {
+      var atom = compound.atoms[ai];
+      var deg = 0;
+      for (var bi = 0; bi < compound.bonds.length; bi++) {
+        var b = compound.bonds[bi];
+        if (b.atomA.id === atom.id || b.atomB.id === atom.id) deg += 1;
+      }
+      if (atom.element === 'O') {
+        if (deg !== 1) return false;
+        oxygen = atom;
+      } else if (deg === 2) {
+        centerN = atom;
+      } else if (deg === 1) {
+        terminalN = atom;
+      } else {
+        return false;
+      }
+    }
+    return !!(centerN && terminalN && oxygen);
+  }
+
+  function getNitrousOxideChain(compound) {
+    if (!isNitrousOxideOnly(compound)) return null;
+    var centerN = null;
+    var terminalN = null;
+    var oxygen = null;
+    for (var ai = 0; ai < compound.atoms.length; ai++) {
+      var atom = compound.atoms[ai];
+      var deg = 0;
+      for (var bi = 0; bi < compound.bonds.length; bi++) {
+        var b = compound.bonds[bi];
+        if (b.atomA.id === atom.id || b.atomB.id === atom.id) deg += 1;
+      }
+      if (atom.element === 'O') oxygen = atom;
+      else if (deg === 2) centerN = atom;
+      else terminalN = atom;
+    }
+    var bondNN = null;
+    var bondNO = null;
+    for (var i = 0; i < compound.bonds.length; i++) {
+      var bond = compound.bonds[i];
+      var ids = [bond.atomA.id, bond.atomB.id];
+      if (ids.indexOf(terminalN.id) !== -1 && ids.indexOf(centerN.id) !== -1) bondNN = bond;
+      if (ids.indexOf(centerN.id) !== -1 && ids.indexOf(oxygen.id) !== -1) bondNO = bond;
+    }
+    if (!bondNN || !bondNO) return null;
+    return {
+      terminalN: terminalN,
+      centerN: centerN,
+      oxygen: oxygen,
+      bondNN: bondNN,
+      bondNO: bondNO,
+    };
+  }
+
+  function isNitrousOxideKekule(compound) {
+    var chain = getNitrousOxideChain(compound);
+    if (!chain) return false;
+    return chain.bondNN.order === 'double' && chain.bondNO.order === 'single';
+  }
+
+  function compoundHasN2OResonance(compound) {
+    return !!(compound && compound.n2oActive && isNitrousOxideOnly(compound));
+  }
+
+  function clearN2OState(compound) {
+    compound.n2oActive = false;
+    compound.n2oResonanceState = 0;
+    for (var i = 0; i < compound.atoms.length; i++) {
+      compound.atoms[i].ozoneFormalCharge = 0;
+    }
+  }
+
+  function n2oTerminalSideSlots(bondSlot) {
+    var opp = oppositeOrbitalSlot(bondSlot);
+    var extras = ['up', 'down', 'left', 'right'].filter(function (s) {
+      return s !== bondSlot && s !== opp;
+    });
+    return { opp: opp, sideA: extras[0], sideB: extras[1] };
+  }
+
+  function layoutN2OTerminalNTriple(atom, bondSlot) {
+    var sides = n2oTerminalSideSlots(bondSlot);
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[bondSlot] = 'triple';
+    atom.orbitals[sides.opp] = 0;
+    atom.orbitals[sides.sideA] = 2;
+    atom.orbitals[sides.sideB] = 0;
+  }
+
+  function layoutN2OTerminalNDoubleMinus(atom, bondSlot) {
+    var sides = n2oTerminalSideSlots(bondSlot);
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[bondSlot] = 'double';
+    atom.orbitals[sides.opp] = 2;
+    atom.orbitals[sides.sideA] = 2;
+    atom.orbitals[sides.sideB] = 0;
+  }
+
+  function layoutN2OOxygenDouble(atom, bondSlot) {
+    var sides = n2oTerminalSideSlots(bondSlot);
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[bondSlot] = 'double';
+    atom.orbitals[sides.opp] = 0;
+    atom.orbitals[sides.sideA] = 2;
+    atom.orbitals[sides.sideB] = 2;
+  }
+
+  function layoutN2OTerminalNDouble(atom, bondSlot) {
+    var sides = n2oTerminalSideSlots(bondSlot);
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[bondSlot] = 'double';
+    atom.orbitals[sides.opp] = 1;
+    atom.orbitals[sides.sideA] = 2;
+    atom.orbitals[sides.sideB] = 0;
+  }
+
+  function layoutN2OCenterTripleSinglePlus(atom, nnSlot, noSlot) {
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[nnSlot] = 'triple';
+    atom.orbitals[noSlot] = 'single';
+  }
+
+  function layoutN2OCenterDoubleDoublePlus(atom, nnSlot, noSlot) {
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[nnSlot] = 'double';
+    atom.orbitals[noSlot] = 'double';
+  }
+
+  function layoutN2OCenterDoubleSingle(atom, nnSlot, noSlot) {
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[nnSlot] = 'double';
+    atom.orbitals[noSlot] = 'single';
+    var free = slots.filter(function (s) { return s !== nnSlot && s !== noSlot; });
+    atom.orbitals[free[0]] = 2;
+    atom.orbitals[free[1]] = 0;
+  }
+
+  function layoutNitrogenWithSingleBond(atom, bondSlot) {
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    atom.orbitals[bondSlot] = 'single';
+    var rest = slots.filter(function (s) { return s !== bondSlot; });
+    if (bondSlot !== 'up') {
+      atom.orbitals.up = 2;
+      rest = rest.filter(function (s) { return s !== 'up'; });
+      atom.orbitals[rest[0]] = 1;
+      atom.orbitals[rest[1]] = 1;
+    } else {
+      atom.orbitals[rest[0]] = 2;
+      atom.orbitals[rest[1]] = 1;
+      atom.orbitals[rest[2]] = 1;
+    }
+  }
+
+  function layoutNitrogenDimerDouble(atom, bondSlot) {
+    var opp = oppositeOrbitalSlot(bondSlot);
+    var slots = ['up', 'down', 'left', 'right'];
+    for (var i = 0; i < slots.length; i++) atom.orbitals[slots[i]] = 0;
+    var perps = slots.filter(function (s) { return s !== bondSlot && s !== opp; });
+    var pairSlot = perps.indexOf('up') !== -1 ? 'up' : perps[0];
+    var emptySlot = pairSlot === perps[0] ? perps[1] : perps[0];
+    atom.orbitals[bondSlot] = 'double';
+    atom.orbitals[opp] = 1;
+    atom.orbitals[pairSlot] = 2;
+    atom.orbitals[emptySlot] = 0;
+  }
+
+  function layoutN2OKekuleBonds(compound) {
+    var chain = getNitrousOxideChain(compound);
+    if (!chain) return false;
+    clearN2OState(compound);
+    chain.bondNN.order = 'double';
+    chain.bondNO.order = 'single';
+    layoutN2OTerminalNDouble(chain.terminalN, bondSlotForAtom(chain.bondNN, chain.terminalN));
+    layoutN2OCenterDoubleSingle(
+      chain.centerN,
+      bondSlotForAtom(chain.bondNN, chain.centerN),
+      bondSlotForAtom(chain.bondNO, chain.centerN));
+    layoutOzoneTerminalSingleOuter(chain.oxygen, bondSlotForAtom(chain.bondNO, chain.oxygen));
+    return compound.atoms.every(function (a) {
+      return a.isValenceConsistent();
+    });
+  }
+
+  function restoreAfterN2OBreak(compound) {
+    for (var i = 0; i < compound.atoms.length; i++) {
+      compound.atoms[i].ozoneFormalCharge = 0;
+    }
+    var remaining = compound.bonds.length === 1 ? compound.bonds[0] : null;
+    if (!remaining) {
+      for (var ai = 0; ai < compound.atoms.length; ai++) {
+        resetAtomOrbitals(compound.atoms[ai]);
+      }
+      return;
+    }
+    var a = remaining.atomA;
+    var b = remaining.atomB;
+    if (a.element === 'N' && b.element === 'N') {
+      remaining.order = 'double';
+      layoutNitrogenDimerDouble(a, bondSlotForAtom(remaining, a));
+      layoutNitrogenDimerDouble(b, bondSlotForAtom(remaining, b));
+    } else {
+      remaining.order = 'single';
+      var nitrogen = a.element === 'N' ? a : b;
+      var oxygen = a.element === 'O' ? a : b;
+      layoutNitrogenWithSingleBond(nitrogen, bondSlotForAtom(remaining, nitrogen));
+      layoutOzoneTerminalSingleOuter(oxygen, bondSlotForAtom(remaining, oxygen));
+    }
+    for (var ri = 0; ri < compound.atoms.length; ri++) {
+      if (!compound.atomHasBonds(compound.atoms[ri])) {
+        resetAtomOrbitals(compound.atoms[ri]);
+      }
+    }
   }
 
   function clearOzoneState(compound) {
@@ -4312,6 +5541,28 @@
     return parts;
   }
 
+  function ensureCanvasTrashBin() {
+    var existing = document.getElementById('canvas-trash-bin');
+    if (existing) return existing;
+    var container = document.querySelector('.canvas-bottom-tools');
+    if (!container) return null;
+    var trash = document.createElement('div');
+    trash.className = 'canvas-trash-bin';
+    trash.id = 'canvas-trash-bin';
+    trash.setAttribute('data-tooltip', 'Drag atoms and compounds here to delete them');
+    trash.setAttribute('aria-label', 'Drag atoms and compounds here to delete them');
+    trash.innerHTML =
+      '<svg class="canvas-trash-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">' +
+      '<path d="M3 6h18" />' +
+      '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />' +
+      '<path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />' +
+      '<path d="M10 11v6" />' +
+      '<path d="M14 11v6" />' +
+      '</svg>';
+    container.appendChild(trash);
+    return trash;
+  }
+
   function syncLayoutInsets() {
     var toolbar = document.querySelector('.toolbar');
     if (toolbar) {
@@ -4325,6 +5576,7 @@
     var borderY = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
     var stackHeight = basicPalette.offsetHeight + padY + borderY + 147;
     document.documentElement.style.setProperty('--left-toolbox-stack-height', stackHeight + 'px');
+    ensureCanvasTrashBin();
   }
 
   function getTooltipText(el) {
@@ -4591,6 +5843,8 @@
       this.structureKeyAtValidation = null;
       this.ozoneActive = false;
       this.ozoneResonanceState = 0;
+      this.n2oActive = false;
+      this.n2oResonanceState = 0;
       this.benzeneRings = [];
       for (const atom of this.atoms) atom.compoundId = this.id;
     }
@@ -4610,6 +5864,9 @@
       const atomPart = Array.from(posById.values()).sort().join('|');
       if (this.ozoneActive && isOzoneOnly(this)) {
         return atomPart + '||ozone';
+      }
+      if (this.n2oActive && isNitrousOxideOnly(this)) {
+        return atomPart + '||n2o';
       }
       if (this.atoms.some(function (a) { return a.nDativeHub && a.nDativeHub.resonanceActive; })) {
         return atomPart + '||ndres';
@@ -4631,6 +5888,9 @@
 
     identificationKey() {
       var atomPart = this.atoms.map(function (a) { return a.id + ':' + a.element; }).sort().join('|');
+      if (this.n2oActive && isNitrousOxideOnly(this)) {
+        return atomPart + '||n2o';
+      }
       var ringBondIds = benzeneRingBondIdSet(this);
       var resonating = compoundHasActiveBenzeneResonance(this);
       var bondPart = this.bonds.map(function (b) {
@@ -4644,6 +5904,7 @@
       }).sort().join('|');
       var extra = '';
       if (this.ozoneActive && isOzoneOnly(this)) extra += '||ozone';
+      if (this.n2oActive && isNitrousOxideOnly(this)) extra += '||n2o';
       if (this.atoms.some(function (a) { return a.nDativeHub && a.nDativeHub.resonanceActive; })) {
         extra += '||ndres';
       }
@@ -5845,11 +7106,18 @@
     }
 
     breakBond(bond, compound) {
+      if (isBenzeneRingBond(bond, compound)) return false;
       var isCo = isCoOnlyDiatomic(compound);
       var isO3 = isOzoneOnly(compound);
+      var isN2O = isNitrousOxideOnly(compound);
       var wasOzoneActive = isO3 && compound.ozoneActive;
+      var wasN2OActive = isN2O && compound.n2oActive;
       if (wasOzoneActive) {
         clearOzoneState(compound);
+        if (window.app && window.app.renderer) window.app.renderer.stopOzoneResonanceTimer();
+      }
+      if (wasN2OActive) {
+        clearN2OState(compound);
         if (window.app && window.app.renderer) window.app.renderer.stopOzoneResonanceTimer();
       }
       if (isCo) {
@@ -5867,6 +7135,12 @@
       if (isO3 && wasOzoneActive) {
         compound.removeBond(bond.id);
         restoreOxygenAfterOzoneBreak(compound);
+        this.clearPairSuppression(bond.atomA, bond.atomB);
+        return true;
+      }
+      if (isN2O) {
+        compound.removeBond(bond.id);
+        restoreAfterN2OBreak(compound);
         this.clearPairSuppression(bond.atomA, bond.atomB);
         return true;
       }
@@ -5913,6 +7187,15 @@
         var type2BondId = hub ? hub.type2BondId : null;
         var type3BondId = hub ? hub.type3BondId : null;
         var loneSlot = hub ? hub.loneSlot : noEnds.nitrogenSlot;
+        var wasThreeWaySulfur = wasResonance && type3BondId &&
+          noEnds.nitrogen.element === 'S' && bond.id === hub.receiverBondId;
+        if (wasThreeWaySulfur) {
+          breakSulfurTrioxideReceiverBond(bond, compound, noEnds.nitrogen, hub, this);
+          if (window.app && window.app.renderer) window.app.renderer.ensureNDativeResonanceTimer();
+          this.clearPairSuppression(bond.atomA, bond.atomB);
+          return true;
+        }
+        returnOxoResonanceBondElectrons(bond, noEnds.nitrogen, this);
         compound.removeBond(bond.id);
         restoreIsolatedOxygen(noEnds.oxygen);
         clearNDativeHub(noEnds.nitrogen);
@@ -5921,7 +7204,13 @@
         restoreNitrogenAfterReceiverBreak(
           noEnds.nitrogen, compound, loneSlot, this.electronResolver, type2Bond);
         if (type3Bond) restoreOxoDativeBond(type3Bond, noEnds.nitrogen);
-        if (window.app && window.app.renderer) window.app.renderer.stopNDativeResonanceTimer();
+        if (window.app && window.app.renderer) {
+          if (compoundHasNDativeResonance(compound)) {
+            window.app.renderer.ensureNDativeResonanceTimer();
+          } else {
+            window.app.renderer.stopNDativeResonanceTimer();
+          }
+        }
         this.clearPairSuppression(bond.atomA, bond.atomB);
         return true;
       }
@@ -5942,6 +7231,60 @@
       if (!compound.ozoneActive || !isOzoneOnly(compound)) return false;
       if (window.app && window.app.renderer) window.app.renderer.stopOzoneResonanceTimer();
       if (!layoutOzoneSingleBonds(compound)) return false;
+      return true;
+    }
+
+    deactivateN2O(compound) {
+      if (!compound.n2oActive || !isNitrousOxideOnly(compound)) return false;
+      if (window.app && window.app.renderer) window.app.renderer.stopOzoneResonanceTimer();
+      if (!layoutN2OKekuleBonds(compound)) return false;
+      return true;
+    }
+
+    applyN2OResonanceState(compound, stateIndex) {
+      var chain = getNitrousOxideChain(compound);
+      if (!chain) return false;
+      var termSlot = bondSlotForAtom(chain.bondNN, chain.terminalN);
+      var centerNN = bondSlotForAtom(chain.bondNN, chain.centerN);
+      var centerNO = bondSlotForAtom(chain.bondNO, chain.centerN);
+      var oSlot = bondSlotForAtom(chain.bondNO, chain.oxygen);
+
+      if (stateIndex === 0) {
+        chain.bondNN.order = 'triple';
+        chain.bondNO.order = 'single';
+        chain.terminalN.ozoneFormalCharge = 0;
+        chain.centerN.ozoneFormalCharge = 1;
+        chain.oxygen.ozoneFormalCharge = -1;
+        layoutN2OTerminalNTriple(chain.terminalN, termSlot);
+        layoutN2OCenterTripleSinglePlus(chain.centerN, centerNN, centerNO);
+        layoutOzoneTerminalMinus(chain.oxygen, oSlot);
+      } else {
+        chain.bondNN.order = 'double';
+        chain.bondNO.order = 'double';
+        chain.terminalN.ozoneFormalCharge = -1;
+        chain.centerN.ozoneFormalCharge = 1;
+        chain.oxygen.ozoneFormalCharge = 0;
+        layoutN2OTerminalNDoubleMinus(chain.terminalN, termSlot);
+        layoutN2OCenterDoubleDoublePlus(chain.centerN, centerNN, centerNO);
+        layoutN2OOxygenDouble(chain.oxygen, oSlot);
+      }
+
+      return compound.atoms.every(function (a) {
+        return a.isValenceConsistent() && a.countFreeElectrons() === 0;
+      });
+    }
+
+    activateN2O(compound, clickedBond) {
+      var chain = getNitrousOxideChain(compound);
+      if (!chain || !isNitrousOxideKekule(compound)) return false;
+      var state = clickedBond.id === chain.bondNN.id ? 0 : 1;
+      compound.n2oActive = true;
+      compound.n2oResonanceState = state;
+      if (!this.applyN2OResonanceState(compound, state)) {
+        clearN2OState(compound);
+        return false;
+      }
+      if (window.app && window.app.renderer) window.app.renderer.ensureOzoneResonanceTimer();
       return true;
     }
 
@@ -6000,6 +7343,12 @@
         if (bond.order !== 'single') return false;
         if (!compound.bonds.every(function (b) { return b.order === 'single'; })) return false;
         return this.activateOzone(compound, bond);
+      }
+      if (isNitrousOxideOnly(compound) && compound.n2oActive) {
+        return this.deactivateN2O(compound);
+      }
+      if (isNitrousOxideKekule(compound)) {
+        return this.activateN2O(compound, bond);
       }
       if (bond.order === 'n_dative' || bond.order === 'p_dative' ||
           bond.order === 's_dative' || bond.order === 'cl_dative') return false;
@@ -6160,6 +7509,14 @@
           { idx: atomIndex.get(minusAtom.id), charge: -1 });
       }
     }
+    if (compound.n2oActive && isNitrousOxideOnly(compound)) {
+      var n2o = getNitrousOxideChain(compound);
+      if (n2o) {
+        chargeEntries.push(
+          { idx: atomIndex.get(n2o.centerN.id), charge: 1 },
+          { idx: atomIndex.get(n2o.oxygen.id), charge: -1 });
+      }
+    }
     if (chargeEntries.length) {
       chargeEntries = mergeChargeEntries(chargeEntries);
       block += 'M  CHG  ' + chargeEntries.length;
@@ -6215,12 +7572,593 @@
     });
   }
 
+  function getCuratedFunctionalGroups(taskId) {
+    var map = window.CURATED_TASK_FUNCTIONAL_GROUPS;
+    if (!map || !map[taskId]) return [];
+    return map[taskId].map(function (entry) {
+      if (typeof entry === 'string') return { group: entry, count: 1 };
+      return { group: entry.group, count: entry.count || 1 };
+    });
+  }
+
+  function pubchemStructureImageUrl(cid) {
+    return 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/' +
+      cid + '/PNG?record_type=2d&image_size=300x300';
+  }
+
+  function renderTaskClueDisclosure(options) {
+    var clueId = options.clueId;
+    var label = options.label;
+    var open = !!options.open;
+    var panelClass = options.panelClass || '';
+    var content = options.content || '';
+    var html = '<div class="task-clue-disclosure' + (open ? ' is-open' : '') +
+      '" data-clue-disclosure="' + clueId + '">';
+    html += '<button type="button" class="task-clue-disclosure-toggle" aria-expanded="' +
+      (open ? 'true' : 'false') + '">';
+    html += '<span class="task-clue-disclosure-label">' + label + '</span>';
+    html += '<svg class="task-clue-disclosure-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">';
+    html += '<path d="M9 6l6 6-6 6"></path></svg></button>';
+    html += '<div class="task-clue-disclosure-panel' +
+      (panelClass ? ' ' + panelClass : '') + '"' + (open ? '' : ' hidden') + '>';
+    html += content;
+    html += '</div></div>';
+    return html;
+  }
+
+  function renderTaskStructureClue(task, open) {
+    if (!task.cid) return '';
+    var content = '<div class="task-structure-clue" aria-label="Skeletal structure">';
+    content += '<img class="task-structure-diagram" data-pubchem-cid="' + task.cid + '"';
+    if (open) content += ' src="' + pubchemStructureImageUrl(task.cid) + '"';
+    content += ' alt="' + task.name.replace(/"/g, '&quot;') +
+      ' skeletal structure" width="300" height="300" loading="lazy" />';
+    content += '</div>';
+    return renderTaskClueDisclosure({
+      clueId: 'structure',
+      label: 'Structure',
+      open: open,
+      panelClass: 'task-structure-panel',
+      content: content,
+    });
+  }
+
+  function ensureTaskStructureImageLoaded(panel) {
+    if (!panel) return;
+    var img = panel.querySelector('.task-structure-diagram[data-pubchem-cid]');
+    if (!img || img.getAttribute('src')) return;
+    var cid = img.getAttribute('data-pubchem-cid');
+    if (cid) img.src = pubchemStructureImageUrl(cid);
+  }
+
+  function isClueDisclosureOpen(panelInstance, taskId, clueId) {
+    if (!panelInstance.clueDisclosureOpen || !taskId) return false;
+    return !!panelInstance.clueDisclosureOpen[taskId + ':' + clueId];
+  }
+
+  function setClueDisclosureOpen(panelInstance, taskId, clueId, open) {
+    if (!panelInstance.clueDisclosureOpen) panelInstance.clueDisclosureOpen = {};
+    if (!taskId) return;
+    panelInstance.clueDisclosureOpen[taskId + ':' + clueId] = !!open;
+  }
+
   function formatFormulaSubscript(formula) {
     if (!formula) return '—';
     var subscripts = '₀₁₂₃₄₅₆₇₈₉';
     return formula.replace(/\d/g, function (digit) {
       return subscripts[parseInt(digit, 10)];
     });
+  }
+
+  function taskElementDisplaySymbol(elementKey) {
+    return elementKey === 'CL' ? 'Cl' : elementKey;
+  }
+
+  function formulaClueElementOrder(bag) {
+    var elements = Object.keys(bag);
+    if (bag.C) {
+      var ordered = ['C'];
+      if (bag.H) ordered.push('H');
+      var rest = elements.filter(function (el) { return el !== 'C' && el !== 'H'; });
+      rest.sort();
+      return ordered.concat(rest);
+    }
+    return elements.sort();
+  }
+
+  var FUNCTIONAL_GROUP_ORDER = [
+    'phenyl', 'amine', 'alcohol', 'phenol', 'ketone',
+    'carboxylic acid', 'amide', 'ester', 'ether',
+    'thiol', 'thioether', 'sulfoxide', 'sulfone',
+    'fluorine', 'chlorine', 'trifluoromethyl', 'nitro', 'methyl',
+  ];
+  var FUNCTIONAL_GROUP_DISPLAY_SCALE = 0.5;
+
+  function functionalGroupBag(groups) {
+    var bag = {};
+    if (!groups) return bag;
+    for (var i = 0; i < groups.length; i++) {
+      var group = groups[i];
+      bag[group] = (bag[group] || 0) + 1;
+    }
+    return bag;
+  }
+
+  function functionalGroupOrder(bag) {
+    var ordered = [];
+    for (var i = 0; i < FUNCTIONAL_GROUP_ORDER.length; i++) {
+      var key = FUNCTIONAL_GROUP_ORDER[i];
+      if (bag[key]) ordered.push(key);
+    }
+    var rest = Object.keys(bag).filter(function (key) {
+      return ordered.indexOf(key) === -1;
+    });
+    rest.sort();
+    return ordered.concat(rest);
+  }
+
+  function formatFunctionalGroupLabel(group) {
+    return group.replace(/\b\w/g, function (ch) { return ch.toUpperCase(); });
+  }
+
+  function clueAtomRadius(element) {
+    return OXYGEN_ATOM_RADIUS * (COVALENT_RADIUS_PM[element] / COVALENT_RADIUS_PM.O);
+  }
+
+  function clueAtomFontSize(element) {
+    return OXYGEN_ATOM_FONT_SIZE * (COVALENT_RADIUS_PM[element] / COVALENT_RADIUS_PM.O);
+  }
+
+  function clueBondCenterDistance(elementA, elementB) {
+    var distance = clueAtomRadius(elementA) + BOND_GAP + clueAtomRadius(elementB);
+    if (elementA === 'H' || elementB === 'H') distance *= H_BOND_LENGTH_SCALE;
+    return distance;
+  }
+
+  function createFunctionalGroupSceneBuilder() {
+    var atoms = [];
+    var bonds = [];
+    var stubs = [];
+    var nextId = 0;
+
+    function addAtom(element, x, y) {
+      var atom = { id: 'fg_' + (nextId++), element: element, x: x, y: y };
+      atoms.push(atom);
+      return atom;
+    }
+
+    function bondBetween(atomA, atomB, order) {
+      bonds.push({ a: atomA, b: atomB, order: order || 'single' });
+    }
+
+    function attachFrom(atom, slot, element, order) {
+      var vec = SLOT_VECTORS[slot];
+      var dist = clueBondCenterDistance(atom.element, element);
+      var child = addAtom(element, atom.x + vec.dx * dist, atom.y + vec.dy * dist);
+      bondBetween(atom, child, order);
+      return child;
+    }
+
+    function stub(atom, slot, attachElement) {
+      stubs.push({ atom: atom, slot: slot, attachElement: attachElement || 'C' });
+    }
+
+    function stubDir(atom, dx, dy, attachElement) {
+      stubs.push({ atom: atom, dx: dx, dy: dy, attachElement: attachElement || 'C' });
+    }
+
+    function benzeneRing(cx, cy) {
+      var side = clueBondCenterDistance('C', 'C');
+      var carbons = [];
+      for (var i = 0; i < 6; i++) {
+        var angle = i * 60 * Math.PI / 180;
+        carbons.push(addAtom('C', cx + Math.cos(angle) * side, cy + Math.sin(angle) * side));
+      }
+      for (var j = 0; j < 6; j++) {
+        bondBetween(carbons[j], carbons[(j + 1) % 6], 'single');
+      }
+      return carbons;
+    }
+
+    return {
+      addAtom: addAtom,
+      bondBetween: bondBetween,
+      attachFrom: attachFrom,
+      stub: stub,
+      stubDir: stubDir,
+      benzeneRing: benzeneRing,
+      atoms: atoms,
+      bonds: bonds,
+      stubs: stubs,
+    };
+  }
+
+  function buildFunctionalGroupScene(groupId) {
+    var b = createFunctionalGroupSceneBuilder();
+    switch (groupId) {
+      case 'alcohol': {
+        var alcoholO = b.addAtom('O', 0, 0);
+        b.stub(alcoholO, 'left');
+        b.attachFrom(alcoholO, 'right', 'H');
+        break;
+      }
+      case 'phenol': {
+        var phenolCarbons = b.benzeneRing(0, 0);
+        var phenolO = b.attachFrom(phenolCarbons[0], 'right', 'O');
+        b.attachFrom(phenolO, 'right', 'H');
+        b.stubDir(phenolCarbons[3], -1, 0);
+        break;
+      }
+      case 'amine': {
+        var amineN = b.addAtom('N', 0, 0);
+        b.stub(amineN, 'left');
+        b.attachFrom(amineN, 'up', 'H');
+        b.attachFrom(amineN, 'down', 'H');
+        break;
+      }
+      case 'phenyl': {
+        var phenylCarbons = b.benzeneRing(0, 0);
+        b.stubDir(phenylCarbons[3], -1, 0);
+        break;
+      }
+      case 'ketone': {
+        var ketoneC = b.addAtom('C', 0, 0);
+        b.stub(ketoneC, 'left');
+        b.attachFrom(ketoneC, 'up', 'O', 'double');
+        b.attachFrom(ketoneC, 'right', 'C');
+        break;
+      }
+      case 'carboxylic acid': {
+        var acidC = b.addAtom('C', 0, 0);
+        b.stub(acidC, 'left');
+        b.attachFrom(acidC, 'up', 'O', 'double');
+        var acidO = b.attachFrom(acidC, 'right', 'O');
+        b.attachFrom(acidO, 'right', 'H');
+        break;
+      }
+      case 'amide': {
+        var amideC = b.addAtom('C', 0, 0);
+        b.stub(amideC, 'left');
+        b.attachFrom(amideC, 'up', 'O', 'double');
+        var amideN = b.attachFrom(amideC, 'right', 'N');
+        b.attachFrom(amideN, 'up', 'H');
+        b.attachFrom(amideN, 'down', 'H');
+        break;
+      }
+      case 'ester': {
+        var esterC = b.addAtom('C', 0, 0);
+        b.stub(esterC, 'left');
+        b.attachFrom(esterC, 'up', 'O', 'double');
+        var esterO = b.attachFrom(esterC, 'right', 'O');
+        b.attachFrom(esterO, 'right', 'C');
+        break;
+      }
+      case 'ether': {
+        var etherO = b.addAtom('O', 0, 0);
+        b.stub(etherO, 'left');
+        b.attachFrom(etherO, 'right', 'C');
+        break;
+      }
+      case 'thiol': {
+        var thiolS = b.addAtom('S', 0, 0);
+        b.stub(thiolS, 'left');
+        b.attachFrom(thiolS, 'right', 'H');
+        break;
+      }
+      case 'thioether': {
+        var thioS = b.addAtom('S', 0, 0);
+        b.stub(thioS, 'left');
+        b.attachFrom(thioS, 'right', 'C');
+        break;
+      }
+      case 'sulfoxide': {
+        var sulfoxS = b.addAtom('S', 0, 0);
+        b.stub(sulfoxS, 'left');
+        b.attachFrom(sulfoxS, 'up', 'O', 'double');
+        b.attachFrom(sulfoxS, 'right', 'C');
+        break;
+      }
+      case 'sulfone': {
+        var sulfoneS = b.addAtom('S', 0, 0);
+        b.stub(sulfoneS, 'left');
+        b.attachFrom(sulfoneS, 'up', 'O', 'double');
+        b.attachFrom(sulfoneS, 'down', 'O', 'double');
+        b.attachFrom(sulfoneS, 'right', 'C');
+        break;
+      }
+      case 'fluorine': {
+        var fluoroC = b.addAtom('C', 0, 0);
+        b.stub(fluoroC, 'left');
+        b.attachFrom(fluoroC, 'right', 'F');
+        break;
+      }
+      case 'chlorine': {
+        var chloroC = b.addAtom('C', 0, 0);
+        b.stub(chloroC, 'left');
+        b.attachFrom(chloroC, 'right', 'Cl');
+        break;
+      }
+      case 'trifluoromethyl': {
+        var cf3C = b.addAtom('C', 0, 0);
+        b.stub(cf3C, 'left');
+        b.attachFrom(cf3C, 'up', 'F');
+        b.attachFrom(cf3C, 'down', 'F');
+        b.attachFrom(cf3C, 'right', 'F');
+        break;
+      }
+      case 'nitro': {
+        var nitroC = b.addAtom('C', 0, 0);
+        b.stub(nitroC, 'left');
+        var nitroN = b.attachFrom(nitroC, 'right', 'N');
+        b.attachFrom(nitroN, 'up', 'O', 'double');
+        b.attachFrom(nitroN, 'down', 'O');
+        break;
+      }
+      case 'methyl': {
+        var methylC = b.addAtom('C', 0, 0);
+        b.stub(methylC, 'left');
+        b.attachFrom(methylC, 'up', 'H');
+        b.attachFrom(methylC, 'down', 'H');
+        b.attachFrom(methylC, 'right', 'H');
+        break;
+      }
+      default:
+        return null;
+    }
+    return { atoms: b.atoms, bonds: b.bonds, stubs: b.stubs };
+  }
+
+  function functionalGroupStubDirectionX(stub) {
+    if (stub.slot === 'left') return -1;
+    if (stub.slot === 'right') return 1;
+    if (stub.dx != null) return stub.dx >= 0 ? 1 : -1;
+    return 0;
+  }
+
+  function flipFunctionalGroupSceneX(scene) {
+    if (!scene.atoms.length) return;
+    var minX = Infinity;
+    var maxX = -Infinity;
+    for (var i = 0; i < scene.atoms.length; i++) {
+      var x = scene.atoms[i].x;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+    var pivot = (minX + maxX) / 2;
+    for (var ai = 0; ai < scene.atoms.length; ai++) {
+      scene.atoms[ai].x = 2 * pivot - scene.atoms[ai].x;
+    }
+    for (var si = 0; si < scene.stubs.length; si++) {
+      var stub = scene.stubs[si];
+      if (stub.slot === 'left') stub.slot = 'right';
+      else if (stub.slot === 'right') stub.slot = 'left';
+      else if (stub.dx != null) stub.dx = -stub.dx;
+    }
+  }
+
+  function orientFunctionalGroupSceneLeft(scene) {
+    for (var i = 0; i < scene.stubs.length; i++) {
+      if (functionalGroupStubDirectionX(scene.stubs[i]) > 0) {
+        flipFunctionalGroupSceneX(scene);
+        break;
+      }
+    }
+  }
+
+  function functionalGroupBondEdgePoints(atomA, atomB) {
+    var dx = atomB.x - atomA.x;
+    var dy = atomB.y - atomA.y;
+    var len = Math.hypot(dx, dy) || 1;
+    var rA = clueAtomRadius(atomA.element);
+    var rB = clueAtomRadius(atomB.element);
+    return {
+      x1: atomA.x + (dx / len) * rA,
+      y1: atomA.y + (dy / len) * rA,
+      x2: atomB.x - (dx / len) * rB,
+      y2: atomB.y - (dy / len) * rB,
+      px: -dy / len,
+      py: dx / len,
+    };
+  }
+
+  function functionalGroupStubPoints(stub) {
+    var vec;
+    if (stub.slot) {
+      vec = SLOT_VECTORS[stub.slot] || { dx: 0, dy: 0 };
+    } else {
+      var len = Math.hypot(stub.dx, stub.dy) || 1;
+      vec = { dx: stub.dx / len, dy: stub.dy / len };
+    }
+    var attachElement = stub.attachElement || 'C';
+    var radius = clueAtomRadius(stub.atom.element);
+    var attachRadius = clueAtomRadius(attachElement);
+    var centerReach = clueBondCenterDistance(stub.atom.element, attachElement);
+    var visibleLength = centerReach - radius - attachRadius;
+    return {
+      x1: stub.atom.x + vec.dx * radius,
+      y1: stub.atom.y + vec.dy * radius,
+      x2: stub.atom.x + vec.dx * (radius + visibleLength),
+      y2: stub.atom.y + vec.dy * (radius + visibleLength),
+    };
+  }
+
+  function normalizeFunctionalGroupScene(scene) {
+    var padding = 6;
+    var minX = Infinity;
+    var minY = Infinity;
+    var maxX = -Infinity;
+    var maxY = -Infinity;
+    function includePoint(x, y) {
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    for (var i = 0; i < scene.atoms.length; i++) {
+      var atom = scene.atoms[i];
+      var r = clueAtomRadius(atom.element);
+      includePoint(atom.x - r, atom.y - r);
+      includePoint(atom.x + r, atom.y + r);
+    }
+    for (var si = 0; si < scene.stubs.length; si++) {
+      var stubPts = functionalGroupStubPoints(scene.stubs[si]);
+      includePoint(stubPts.x1, stubPts.y1);
+      includePoint(stubPts.x2, stubPts.y2);
+    }
+    if (!scene.atoms.length) {
+      return { atoms: [], bonds: scene.bonds, stubs: scene.stubs, viewBox: '0 0 1 1' };
+    }
+    var shiftX = padding - minX;
+    var shiftY = padding - minY;
+    var shiftedAtoms = scene.atoms.map(function (atom) {
+      return {
+        id: atom.id,
+        element: atom.element,
+        x: atom.x + shiftX,
+        y: atom.y + shiftY,
+      };
+    });
+    var atomById = {};
+    for (var ai = 0; ai < shiftedAtoms.length; ai++) atomById[scene.atoms[ai].id] = shiftedAtoms[ai];
+    var shiftedStubs = scene.stubs.map(function (stub) {
+      return {
+        atom: atomById[stub.atom.id],
+        slot: stub.slot,
+        dx: stub.dx,
+        dy: stub.dy,
+        attachElement: stub.attachElement,
+      };
+    });
+    var width = maxX - minX + padding * 2;
+    var height = maxY - minY + padding * 2;
+    return {
+      atoms: shiftedAtoms,
+      bonds: scene.bonds,
+      stubs: shiftedStubs,
+      viewBox: '0 0 ' + width.toFixed(2) + ' ' + height.toFixed(2),
+    };
+  }
+
+  function functionalGroupSvgLine(x1, y1, x2, y2, strokeWidth) {
+    return '<line x1="' + x1.toFixed(2) + '" y1="' + y1.toFixed(2) + '" x2="' +
+      x2.toFixed(2) + '" y2="' + y2.toFixed(2) + '" stroke="#ffffff" stroke-width="' +
+      strokeWidth.toFixed(2) + '" stroke-linecap="round"/>';
+  }
+
+  function renderFunctionalGroupBondSvg(bond, atomById) {
+    var atomA = atomById[bond.a.id];
+    var atomB = atomById[bond.b.id];
+    if (!atomA || !atomB) return '';
+    var edge = functionalGroupBondEdgePoints(atomA, atomB);
+    var stroke = BOND_STROKE_WIDTH;
+    var html = '';
+    if (bond.order === 'double') {
+      var sep = 3;
+      html += functionalGroupSvgLine(
+        edge.x1 + edge.px * sep, edge.y1 + edge.py * sep,
+        edge.x2 + edge.px * sep, edge.y2 + edge.py * sep, stroke);
+      html += functionalGroupSvgLine(
+        edge.x1 - edge.px * sep, edge.y1 - edge.py * sep,
+        edge.x2 - edge.px * sep, edge.y2 - edge.py * sep, stroke);
+    } else if (bond.order === 'triple') {
+      var tripleSep = 6;
+      html += functionalGroupSvgLine(edge.x1, edge.y1, edge.x2, edge.y2, BOND_TRIPLE_CENTER_WIDTH);
+      html += functionalGroupSvgLine(
+        edge.x1 + edge.px * tripleSep, edge.y1 + edge.py * tripleSep,
+        edge.x2 + edge.px * tripleSep, edge.y2 + edge.py * tripleSep, stroke);
+      html += functionalGroupSvgLine(
+        edge.x1 - edge.px * tripleSep, edge.y1 - edge.py * tripleSep,
+        edge.x2 - edge.px * tripleSep, edge.y2 - edge.py * tripleSep, stroke);
+    } else {
+      html += functionalGroupSvgLine(edge.x1, edge.y1, edge.x2, edge.y2, stroke);
+    }
+    return html;
+  }
+
+  function renderFunctionalGroupAtomSvg(atom) {
+    var radius = clueAtomRadius(atom.element);
+    var fontSize = clueAtomFontSize(atom.element);
+    var fill = ELEMENT_COLORS[atom.element];
+    var textFill = ELEMENT_TEXT_COLORS[atom.element];
+    return '<circle cx="' + atom.x.toFixed(2) + '" cy="' + atom.y.toFixed(2) + '" r="' +
+      radius.toFixed(2) + '" fill="' + fill + '" stroke="#2d3a4f" stroke-width="2"/>' +
+      '<text x="' + atom.x.toFixed(2) + '" y="' + (atom.y + ATOM_LABEL_Y_OFFSET).toFixed(2) +
+      '" text-anchor="middle" dominant-baseline="central" fill="' + textFill +
+      '" font-family="' + ATOM_FONT + '" font-size="' + fontSize.toFixed(2) +
+      '" font-weight="700">' + atom.element + '</text>';
+  }
+
+  function renderFunctionalGroupSceneSvg(groupId) {
+    var scene = buildFunctionalGroupScene(groupId);
+    if (!scene) return '';
+    orientFunctionalGroupSceneLeft(scene);
+    var normalized = normalizeFunctionalGroupScene(scene);
+    var atomById = {};
+    for (var i = 0; i < normalized.atoms.length; i++) {
+      var atom = normalized.atoms[i];
+      atomById[scene.atoms[i].id] = atom;
+    }
+    var parts = [];
+    for (var bi = 0; bi < scene.bonds.length; bi++) {
+      parts.push(renderFunctionalGroupBondSvg(scene.bonds[bi], atomById));
+    }
+    var stubStroke = BOND_STROKE_WIDTH;
+    for (var si = 0; si < normalized.stubs.length; si++) {
+      var stubPts = functionalGroupStubPoints(normalized.stubs[si]);
+      parts.push(functionalGroupSvgLine(stubPts.x1, stubPts.y1, stubPts.x2, stubPts.y2, stubStroke));
+    }
+    for (var ai = 0; ai < normalized.atoms.length; ai++) {
+      parts.push(renderFunctionalGroupAtomSvg(normalized.atoms[ai]));
+    }
+    var viewParts = normalized.viewBox.split(/\s+/);
+    var viewWidth = (parseFloat(viewParts[2]) || 1) * FUNCTIONAL_GROUP_DISPLAY_SCALE;
+    var viewHeight = (parseFloat(viewParts[3]) || 1) * FUNCTIONAL_GROUP_DISPLAY_SCALE;
+    return '<svg class="task-functional-group-svg" viewBox="' + normalized.viewBox +
+      '" width="' + viewWidth.toFixed(2) + '" height="' + viewHeight.toFixed(2) +
+      '" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="' +
+      formatFunctionalGroupLabel(groupId) + ' structure">' + parts.join('') + '</svg>';
+  }
+
+  function renderAtomBagClue(bag, options) {
+    options = options || {};
+    var elements = formulaClueElementOrder(bag);
+    if (!elements.length) return options.empty || '—';
+    var html = '<div class="task-formula-clue' +
+      (options.className ? ' ' + options.className : '') +
+      '" aria-label="' + (options.ariaLabel || 'Required atoms') + '">';
+    for (var i = 0; i < elements.length; i++) {
+      var key = elements[i];
+      var count = bag[key];
+      var symbol = taskElementDisplaySymbol(key);
+      html += '<span class="task-formula-clue-item">';
+      html += '<span class="task-clue-atom" data-element="' + symbol + '">' + symbol + '</span>';
+      if (count > 1) html += '<span class="task-formula-clue-count">×' + count + '</span>';
+      html += '</span>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function renderFormulaAtomClue(formula) {
+    return renderAtomBagClue(taskFormulaBag(formula), { ariaLabel: 'Required atoms' });
+  }
+
+  function renderFunctionalGroupClue(entries) {
+    if (!entries || !entries.length) return '—';
+    var html = '<div class="task-functional-clue" aria-label="Functional groups">';
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var key = entry.group;
+      var count = entry.count || 1;
+      html += '<div class="task-functional-clue-row">';
+      html += '<span class="task-functional-clue-label">' + formatFunctionalGroupLabel(key) + '</span>';
+      html += '<span class="task-functional-clue-structure">' + renderFunctionalGroupSceneSvg(key) + '</span>';
+      html += '<span class="task-functional-clue-count">';
+      if (count > 1) html += '×' + count;
+      html += '</span></div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   function formatMolecularWeight(weight) {
@@ -6482,7 +8420,7 @@
       compound.validationState = 'validated';
       compound.structureKeyAtValidation = structureKey;
       compound._validationStructureKey = null;
-      if (this.onStatusChange) this.onStatusChange('Identified: ' + result.name);
+      announceCompoundIdentified(compound, result.name, this.onStatusChange);
       if (window.app) window.app.renderer.setCompoundLabel(compound, compound.name);
     }
 
@@ -6536,7 +8474,7 @@
           compound.validationState = 'validated';
           compound.structureKeyAtValidation = structureKey;
           compound._validationStructureKey = null;
-          if (self.onStatusChange) self.onStatusChange('Identified: ' + result.name);
+          announceCompoundIdentified(compound, result.name, self.onStatusChange);
           if (window.app) window.app.renderer.setCompoundLabel(compound, compound.name);
           startCompoundPanelEnrichment(compound);
           return;
@@ -6571,7 +8509,7 @@
           compound.validationState = 'validated';
           compound.structureKeyAtValidation = structureKey;
           compound._validationStructureKey = null;
-          if (self.onStatusChange) self.onStatusChange('Identified: ' + curated.name);
+          announceCompoundIdentified(compound, curated.name, self.onStatusChange);
           if (window.app) window.app.renderer.setCompoundLabel(compound, compound.name);
           return;
         }
@@ -6944,6 +8882,202 @@
     }
   }
 
+  class TasksPanel {
+    constructor() {
+      this.panel = document.getElementById('tasks-panel');
+      this.body = document.getElementById('tasks-panel-body');
+      this.totalCountEl = document.getElementById('tasks-star-total');
+      this.toggleBtn = document.getElementById('btn-tasks-panel');
+      this.closeBtn = document.getElementById('tasks-panel-close');
+      this.discovered = loadDiscoveredTaskIds();
+      this.activeTaskId = null;
+      this.open = false;
+      this.clueDisclosureOpen = {};
+      var self = this;
+      if (this.toggleBtn) {
+        this.toggleBtn.addEventListener('click', function () { self.setOpen(!self.open); });
+      }
+      if (this.closeBtn) {
+        this.closeBtn.addEventListener('click', function () { self.setOpen(false); });
+      }
+      if (this.body) {
+        this.body.addEventListener('click', function (ev) {
+          if (ev.target.closest('.task-clue-disclosure-panel')) {
+            ev.stopPropagation();
+            return;
+          }
+          var clueToggle = ev.target.closest('.task-clue-disclosure-toggle');
+          if (clueToggle) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var disclosure = clueToggle.closest('.task-clue-disclosure');
+            var panel = disclosure && disclosure.querySelector('.task-clue-disclosure-panel');
+            if (!disclosure || !panel) return;
+            var clueId = disclosure.getAttribute('data-clue-disclosure');
+            var expanded = clueToggle.getAttribute('aria-expanded') === 'true';
+            var nextExpanded = !expanded;
+            clueToggle.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+            disclosure.classList.toggle('is-open', nextExpanded);
+            panel.hidden = !nextExpanded;
+            setClueDisclosureOpen(self, self.activeTaskId, clueId, nextExpanded);
+            if (nextExpanded && clueId === 'structure') ensureTaskStructureImageLoaded(panel);
+            return;
+          }
+          if (ev.target.closest('[data-task-back]')) {
+            self.activeTaskId = null;
+            self.render();
+            return;
+          }
+          var card = ev.target.closest('[data-task-id]');
+          if (card) self.showDetail(card.getAttribute('data-task-id'));
+        });
+      }
+      this.render();
+    }
+
+    setOpen(open) {
+      this.open = !!open;
+      if (!this.panel) return;
+      this.panel.classList.toggle('hidden', !this.open);
+      this.panel.setAttribute('aria-hidden', this.open ? 'false' : 'true');
+      document.body.classList.toggle('tasks-panel-open', this.open);
+      if (this.toggleBtn) this.toggleBtn.setAttribute('aria-expanded', this.open ? 'true' : 'false');
+      if (this.open) this.render();
+    }
+
+    isDiscovered(id) {
+      return !!this.discovered[id];
+    }
+
+    countClassStars(taskClass) {
+      var count = 0;
+      for (var i = 0; i < taskClass.compounds.length; i++) {
+        if (this.isDiscovered(taskClass.compounds[i].id)) count += 1;
+      }
+      return count;
+    }
+
+    countTotalStars() {
+      var total = 0;
+      for (var ci = 0; ci < TASK_CLASSES.length; ci++) {
+        total += this.countClassStars(TASK_CLASSES[ci]);
+      }
+      return total;
+    }
+
+    countTotalPossible() {
+      var total = 0;
+      for (var ci = 0; ci < TASK_CLASSES.length; ci++) {
+        total += TASK_CLASSES[ci].compounds.length;
+      }
+      return total;
+    }
+
+    renderCount(found, possible) {
+      return found + '/' + possible;
+    }
+
+    syncTotalCount() {
+      if (!this.totalCountEl) return;
+      var found = this.countTotalStars();
+      var possible = this.countTotalPossible();
+      this.totalCountEl.innerHTML = this.renderCount(found, possible);
+      this.totalCountEl.setAttribute('aria-label', found + ' of ' + possible + ' discovered');
+    }
+
+    recordDiscovery(compound) {
+      var task = matchTaskForCompound(compound);
+      if (!task) return null;
+      var wasNew = !this.discovered[task.id];
+      this.discovered[task.id] = true;
+      if (wasNew) saveDiscoveredTaskIds(this.discovered);
+      if (this.open) this.render();
+      return task;
+    }
+
+    showDetail(taskId) {
+      this.activeTaskId = taskId;
+      this.render();
+    }
+
+    renderStar(className) {
+      return '<span class="' + className + '" aria-hidden="true">' + TASK_STAR_SVG + '</span>';
+    }
+
+    render() {
+      this.syncTotalCount();
+      if (!this.body) return;
+      var showingDetail = false;
+      if (this.activeTaskId) {
+        var found = findTaskById(this.activeTaskId);
+        if (found) {
+          showingDetail = true;
+          this.body.innerHTML = this.renderDetail(found.taskClass, found.task);
+        } else {
+          this.activeTaskId = null;
+        }
+      }
+      if (!showingDetail) this.body.innerHTML = this.renderList();
+      if (this.panel) this.panel.classList.toggle('is-task-detail', showingDetail);
+    }
+
+    renderList() {
+      var html = '';
+      for (var ci = 0; ci < TASK_CLASSES.length; ci++) {
+        var taskClass = TASK_CLASSES[ci];
+        var classStars = this.countClassStars(taskClass);
+        html += '<section class="task-class">';
+        html += '<h3 class="task-class-title">' + taskClass.title;
+        html += ' <span class="task-star-count">' + this.renderCount(classStars, taskClass.compounds.length) + '</span></h3>';
+        html += '<div class="task-card-grid' + (taskClass.cardsPerRow === 3 ? ' task-card-grid-3' : '') + '">';
+        for (var i = 0; i < taskClass.compounds.length; i++) {
+          var task = taskClass.compounds[i];
+          var discovered = this.isDiscovered(task.id);
+          html += '<button type="button" class="task-card' + (discovered ? ' is-discovered' : '') + '" data-task-id="' + task.id + '">';
+          html += '<span class="task-card-formula">' + formatFormulaSubscript(task.formula) + '</span>';
+          html += '<span class="task-card-name">' + task.name + '</span>';
+          if (discovered) html += this.renderStar('task-card-star');
+          html += '</button>';
+        }
+        html += '</div></section>';
+      }
+      return html;
+    }
+
+    renderDetail(taskClass, task) {
+      var discovered = this.isDiscovered(task.id);
+      var html = '';
+      html += '<button type="button" class="task-detail-back" data-task-back="true">';
+      html += '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>';
+      html += taskClass.title + '</button>';
+      html += '<div class="task-detail-header"><div class="task-detail-title">' + task.name + '</div>';
+      if (discovered) html += this.renderStar('task-detail-star');
+      html += '</div>';
+      html += '<div class="task-detail-status' + (discovered ? ' is-discovered' : '') + '">';
+      html += discovered ? 'Discovered' : 'Not yet discovered';
+      html += '</div>';
+      html += '<div class="task-detail-section">Overview</div>';
+      html += '<p class="task-detail-summary">' + task.summary + '</p>';
+      html += '<div class="task-detail-section">Construction clues</div>';
+      html += '<div class="task-detail-construction">' +
+        renderFormulaAtomClue(task.formula) + '</div>';
+      if (task.cid) {
+        html += renderTaskStructureClue(task, isClueDisclosureOpen(this, task.id, 'structure'));
+      }
+      var functionalGroups = getCuratedFunctionalGroups(task.id);
+      if (taskClass.showFunctionalGroups && functionalGroups.length) {
+        html += renderTaskClueDisclosure({
+          clueId: 'functional-groups',
+          label: 'Functional groups',
+          open: isClueDisclosureOpen(this, task.id, 'functional-groups'),
+          panelClass: 'task-functional-groups-panel task-detail-construction',
+          content: renderFunctionalGroupClue(functionalGroups),
+        });
+      }
+      return html;
+    }
+  }
+
   // ── CanvasRenderer ───────────────────────────────────────────────
   class CanvasRenderer {
     constructor(canvasEl, engine) {
@@ -6964,14 +9098,21 @@
       this.navigatePan = null;
       this.nucleusSwapAtomId = null;
       this.nucleusSwapPhase = 0;
-      this.trashBinEl = document.getElementById('canvas-trash-bin');
       this.workspaceEl = document.querySelector('.workspace');
       var self = this;
       window.addEventListener('resize', function () {
         syncLayoutInsets();
+        self.trashBinEl = document.getElementById('canvas-trash-bin');
         self.resize();
       });
+      if (typeof ResizeObserver === 'function' && this.workspaceEl) {
+        this._workspaceResizeObserver = new ResizeObserver(function () {
+          self.resize();
+        });
+        this._workspaceResizeObserver.observe(this.workspaceEl);
+      }
       syncLayoutInsets();
+      this.trashBinEl = document.getElementById('canvas-trash-bin');
       this.attachCanvasPointerRouting();
       this.attachNavigateControls();
       this.canvas.upperCanvasEl.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -7075,7 +9216,9 @@
     }
 
     isInfoPanelTarget(target) {
-      return !!(target && target.closest && target.closest('#compound-panel, .compound-panel, .panel-conformer'));
+      return !!(target && target.closest && target.closest(
+        '#compound-panel, .compound-panel, .panel-conformer, #tasks-panel, .tasks-panel'
+      ));
     }
 
     isOverWorkspace(clientX, clientY) {
@@ -7631,8 +9774,8 @@
         var oLen = Math.hypot(odx, ody) || 1;
         var opx = -ody / oLen;
         var opy = odx / oLen;
-        var oRadius = getAtomRadius('O');
-        var cRadius = getAtomRadius('C');
+        var oRadius = getAtomRadius(ends.oxygen.element);
+        var cRadius = getAtomRadius(ends.carbon.element);
         var startX = oX + (odx / oLen) * oRadius;
         var startY = oY + (ody / oLen) * oRadius;
         var endX = cX - (odx / oLen) * cRadius;
@@ -8166,7 +10309,8 @@
     ensureOzoneResonanceTimer() {
       var self = this;
       var hasOzone = this.engine.compounds.some(function (c) { return c.ozoneActive; });
-      if (!hasOzone) {
+      var hasN2O = this.engine.compounds.some(function (c) { return c.n2oActive; });
+      if (!hasOzone && !hasN2O) {
         this.stopOzoneResonanceTimer();
         return;
       }
@@ -8175,17 +10319,27 @@
         var changed = false;
         for (var i = 0; i < self.engine.compounds.length; i++) {
           var compound = self.engine.compounds[i];
-          if (!compound.ozoneActive) continue;
-          compound.ozoneResonanceState = compound.ozoneResonanceState === 0 ? 1 : 0;
-          if (self.engine.snapEngine.applyOzoneResonanceState(compound, compound.ozoneResonanceState)) {
-            self.syncBonds(compound);
-            self.refreshCompoundOrbitals(compound);
-            if (compound.name) self.positionCompoundLabels(compound);
-            changed = true;
+          if (compound.ozoneActive) {
+            compound.ozoneResonanceState = compound.ozoneResonanceState === 0 ? 1 : 0;
+            if (self.engine.snapEngine.applyOzoneResonanceState(compound, compound.ozoneResonanceState)) {
+              self.syncBonds(compound);
+              self.refreshCompoundOrbitals(compound);
+              if (compound.name) self.positionCompoundLabels(compound);
+              changed = true;
+            }
+          }
+          if (compound.n2oActive) {
+            compound.n2oResonanceState = compound.n2oResonanceState === 0 ? 1 : 0;
+            if (self.engine.snapEngine.applyN2OResonanceState(compound, compound.n2oResonanceState)) {
+              self.syncBonds(compound);
+              self.refreshCompoundOrbitals(compound);
+              if (compound.name) self.positionCompoundLabels(compound);
+              changed = true;
+            }
           }
         }
         if (changed) self.canvas.renderAll();
-        if (!self.engine.compounds.some(function (c) { return c.ozoneActive; })) {
+        if (!self.engine.compounds.some(function (c) { return c.ozoneActive || c.n2oActive; })) {
           self.stopOzoneResonanceTimer();
         }
       }, 1000);
@@ -8303,6 +10457,7 @@
       this.compounds = [];
       this.snapEngine = new SnapEngine();
       this.infoPanel = new InfoPanel();
+      this.tasksPanel = new TasksPanel();
       this.statusEl = document.getElementById('status');
       var self = this;
       this.validationPipeline = new ValidationPipeline(function (msg) { self.setStatus(msg); });
@@ -8355,6 +10510,8 @@
     }
 
     breakBond(bond, compound) {
+      if (isBenzeneRingBond(bond, compound)) return;
+
       var atomA = bond.atomA;
       var atomB = bond.atomB;
       var slotA = bond.slotA;
@@ -8811,6 +10968,10 @@
         return window.app.snapEngine.breakBond(bond, compound);
       },
       getChlorineFreeElectronSlots: getChlorineFreeElectronSlots,
+      buildFunctionalGroupScene: buildFunctionalGroupScene,
+      renderFunctionalGroupSceneSvg: renderFunctionalGroupSceneSvg,
+      functionalGroupIds: FUNCTIONAL_GROUP_ORDER.slice(),
+      getCuratedFunctionalGroups: getCuratedFunctionalGroups,
     };
   });
 })();

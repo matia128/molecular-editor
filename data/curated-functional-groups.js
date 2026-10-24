@@ -1,0 +1,789 @@
+window.CURATED_TASK_FUNCTIONAL_GROUPS = {
+  "amphetamine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "ephedrine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    }
+  ],
+  "mephedrone": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "ketone",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 1
+    }
+  ],
+  "methamphetamine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "phenylpropanolamine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    }
+  ],
+  "lisdexamfetamine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 2
+    }
+  ],
+  "pseudoephedrine": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    }
+  ],
+  "cathinone": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "ketone",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "modafinil": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "amide",
+      "count": 1
+    },
+    {
+      "group": "sulfoxide",
+      "count": 1
+    }
+  ],
+  "glycine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "alanine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "serine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    }
+  ],
+  "cysteine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "thiol",
+      "count": 1
+    }
+  ],
+  "threonine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    }
+  ],
+  "valine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "leucine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "isoleucine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "methionine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "thioether",
+      "count": 1
+    }
+  ],
+  "phenylalanine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "phenyl",
+      "count": 1
+    }
+  ],
+  "tyrosine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "phenol",
+      "count": 1
+    }
+  ],
+  "aspartic-acid": [
+    {
+      "group": "carboxylic acid",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "glutamic-acid": [
+    {
+      "group": "carboxylic acid",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "asparagine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 1
+    }
+  ],
+  "glutamine": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 1
+    }
+  ],
+  "dopamine": [
+    {
+      "group": "phenol",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "gaba": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    }
+  ],
+  "met-enkephalin": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "thioether",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 4
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "leu-enkephalin": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 4
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "aspirin": [
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "ester",
+      "count": 1
+    }
+  ],
+  "diflunisal": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "fluorine",
+      "count": 2
+    }
+  ],
+  "ethenzamide": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 1
+    },
+    {
+      "group": "ether",
+      "count": 1
+    }
+  ],
+  "salicylamide": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "amide",
+      "count": 1
+    }
+  ],
+  "salicylic-acid": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "salsalate": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "ester",
+      "count": 1
+    }
+  ],
+  "methyl-salicylate": [
+    {
+      "group": "phenol",
+      "count": 1
+    },
+    {
+      "group": "ester",
+      "count": 1
+    }
+  ],
+  "ibuprofen": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 3
+    }
+  ],
+  "dexibuprofen": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 3
+    }
+  ],
+  "ketoprofen": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "ketone",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "dexketoprofen": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "ketone",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "flurbiprofen": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "fluorine",
+      "count": 1
+    }
+  ],
+  "fenbufen": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "ketone",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    }
+  ],
+  "diclofenac": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 2
+    }
+  ],
+  "fenclofenac": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "ether",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 2
+    }
+  ],
+  "aceclofenac": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "ester",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 2
+    }
+  ],
+  "mefenamic-acid": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 2
+    }
+  ],
+  "meclofenamic-acid": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 2
+    },
+    {
+      "group": "methyl",
+      "count": 2
+    }
+  ],
+  "flufenamic-acid": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "trifluoromethyl",
+      "count": 1
+    }
+  ],
+  "tolfenamic-acid": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 1
+    }
+  ],
+  "etofenamate": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "ester",
+      "count": 1
+    },
+    {
+      "group": "ether",
+      "count": 1
+    },
+    {
+      "group": "alcohol",
+      "count": 1
+    },
+    {
+      "group": "trifluoromethyl",
+      "count": 1
+    }
+  ],
+  "lumiracoxib": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 1
+    },
+    {
+      "group": "fluorine",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 1
+    }
+  ],
+  "etoricoxib": [
+    {
+      "group": "phenyl",
+      "count": 1
+    },
+    {
+      "group": "sulfone",
+      "count": 1
+    },
+    {
+      "group": "chlorine",
+      "count": 1
+    },
+    {
+      "group": "methyl",
+      "count": 1
+    }
+  ],
+  "robenacoxib": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "amine",
+      "count": 1
+    },
+    {
+      "group": "carboxylic acid",
+      "count": 1
+    },
+    {
+      "group": "fluorine",
+      "count": 4
+    }
+  ],
+  "nimesulide": [
+    {
+      "group": "phenyl",
+      "count": 2
+    },
+    {
+      "group": "ether",
+      "count": 1
+    },
+    {
+      "group": "sulfone",
+      "count": 1
+    },
+    {
+      "group": "nitro",
+      "count": 1
+    }
+  ]
+}
+;

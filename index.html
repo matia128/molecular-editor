@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Molecular Editor</title>
-  <link rel="stylesheet" href="css/styles.css?v=benzene-hover-1" />
+  <link rel="stylesheet" href="css/styles.css?v=task-clues-1" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.1.0/3Dmol-min.js"></script>
   <script src="https://unpkg.com/@rdkit/rdkit/dist/RDKit_minimal.js"></script>
@@ -73,27 +73,40 @@
           </div>
         </aside>
       </div>
-      <div class="canvas-bottom-tools">
-        <div class="canvas-trash-bin" id="canvas-trash-bin" data-tooltip="Drag atoms and compounds here to delete them" aria-label="Drag atoms and compounds here to delete them">
-          <svg class="canvas-trash-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M3 6h18" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-        </div>
-      </div>
+      <div class="canvas-bottom-tools"></div>
     </div>
     <canvas id="chemistry-canvas"></canvas>
   </main>
 
   <header class="toolbar">
-    <h1>Molecular Editor</h1>
+    <div class="toolbar-brand">
+      <button type="button" class="tasks-toggle" id="btn-tasks-panel" data-tooltip="Tasks" aria-label="Tasks" aria-expanded="false" aria-controls="tasks-panel">
+        <svg class="tasks-toggle-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 7h16" />
+          <path d="M4 12h16" />
+          <path d="M4 17h16" />
+        </svg>
+      </button>
+      <h1>Molecular Editor</h1>
+    </div>
     <div class="toolbar-actions">
       <span id="status" class="status">Ready — drag atoms onto the canvas</span>
     </div>
   </header>
+
+  <aside id="tasks-panel" class="tasks-panel hidden" aria-hidden="true">
+    <button type="button" class="tasks-panel-bookmark" id="tasks-panel-close" data-tooltip="Close tasks" aria-label="Close tasks">
+      <svg class="tasks-panel-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M15 6l-6 6 6 6" />
+      </svg>
+    </button>
+    <div class="tasks-panel-content">
+      <div class="tasks-panel-scroll-inner">
+        <h2 class="tasks-panel-title">Tasks <span id="tasks-star-total" class="task-star-count" aria-label="0 of 0 discovered"></span></h2>
+        <div id="tasks-panel-body"></div>
+      </div>
+    </div>
+  </aside>
 
   <aside id="compound-panel" class="compound-panel hidden" aria-hidden="true">
     <button type="button" class="compound-panel-bookmark" id="panel-close" data-tooltip="Close panel" aria-label="Close panel">
@@ -128,6 +141,7 @@
     </div>
   </aside>
 
-  <script src="js/app.js?v=s-break-double-e-1"></script>
+  <script src="data/curated-functional-groups.js?v=4"></script>
+  <script src="js/app.js?v=task-clues-1"></script>
 </body>
 </html>
